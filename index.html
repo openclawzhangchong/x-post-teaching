@@ -820,6 +820,153 @@
     .preview { padding: 10px; }
     .profile { border-radius: 14px; }
   }
+
+  /* ============================================================
+     12. 翻译演示卡（v1.1.0 新增 · 纯追加段）
+     ------------------------------------------------------------
+     本段所有选择器一律 tr- 前缀，且不复用 / 不覆盖上面任何现有规则：
+       1) 现有帖子卡、主页卡、工具条、导出逻辑一行都不改；
+       2) 颜色全部引用现有主题变量，主题切换自动跟随；
+       3) 结构标注用独立的 .tr-region / .tr-r-*，不挤进现有配色；
+       4) 新卡是 #postCard 的兄弟节点，不进 buildExportSvg 的 clones，
+          所以「帖子卡」「主页+帖子」两档 PNG 与旧版完全一致。
+     ============================================================ */
+  .tr-card {
+    width: 100%;
+    margin-top: 16px;                 /* 像时间线里的下一条帖子 */
+    padding: 16px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+  }
+
+  /* ---------- 12.1 头部：与现有帖子同款排布，但类名独立 ---------- */
+  .tr-head { display: flex; align-items: flex-start; gap: 12px; }
+
+  .tr-avatar {
+    flex: 0 0 40px;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--line);
+    color: var(--text);
+    font-size: 16px; font-weight: 700;
+    user-select: none;
+  }
+  .tr-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .tr-head-main { flex: 1; min-width: 0; display: grid; gap: 2px; padding-top: 1px; }
+  .tr-name-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .tr-name {
+    min-width: 0;
+    font-size: 15px; font-weight: 700; line-height: 20px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tr-badge { display: inline-flex; flex: 0 0 auto; }
+  .tr-badge svg { width: 18px; height: 18px; display: block; }
+  .tr-meta-line {
+    display: flex; align-items: baseline; gap: 4px; min-width: 0;
+    font-size: 14px; line-height: 18px; color: var(--muted);
+  }
+  .tr-handle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tr-time { flex: 0 0 auto; white-space: nowrap; }
+
+  /* ---------- 12.2 正文 / 译文 / 翻译控件 ---------- */
+  .tr-body {
+    margin: 10px 0 0 52px;           /* 52px = 头像 40 + 间距 12，和昵称对齐 */
+    font-size: 15px; line-height: 20px;
+    white-space: pre-wrap; overflow-wrap: break-word;
+  }
+
+  /* 蓝色文字链接：X 里「翻译帖子 / 显示原文」都是这种无边框蓝色链接 */
+  .tr-link {
+    display: inline-block;
+    margin: 10px 0 0 52px;
+    padding: 0;
+    font: inherit; font-size: 14px;
+    color: var(--blue);
+    background: none; border: 0;
+    cursor: pointer;
+  }
+  .tr-link:hover { text-decoration: underline; }
+
+  /* 经典版展开后的译文盒：左侧竖线 + 浅底，和原文在视觉上分层 */
+  .tr-translated {
+    margin: 12px 0 0 52px;
+    padding: 10px 12px;
+    background: var(--hover);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--blue);
+    border-radius: 0 10px 10px 0;
+  }
+  .tr-credit {
+    margin: 0 0 6px;
+    font-size: 12px; line-height: 16px; color: var(--muted);
+  }
+  .tr-translated-text {
+    font-size: 15px; line-height: 20px;
+    white-space: pre-wrap; overflow-wrap: break-word;
+  }
+
+  /* 2026 自动版：顶部一条「翻译自英语」+「显示原文」 */
+  .tr-auto-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+    margin: 12px 0 0 52px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px; color: var(--muted);
+  }
+  .tr-auto-bar .tr-link { margin: 0; font-size: 13px; }
+
+  /* ---------- 12.3 互动行（简化：只有图标，不带数字） ---------- */
+  .tr-actions {
+    display: flex; justify-content: space-between;
+    max-width: 400px; margin: 12px 0 0 52px;
+    color: var(--muted);
+  }
+  .tr-action {
+    display: inline-flex; align-items: center;
+    padding: 4px 2px;
+    color: inherit; background: none; border: 0; border-radius: 8px;
+    cursor: pointer;
+  }
+  .tr-action svg {
+    width: 18px; height: 18px;
+    fill: none; stroke: currentColor; stroke-width: 1.6;
+  }
+  .tr-action:hover { color: var(--blue); }
+
+  /* ---------- 12.4 结构标注：独立一套色，不改现有 .region ---------- */
+  .tr-region { position: relative; }
+  .tr-r-head    { --tr-region-color: #60a5fa; }
+  .tr-r-orig    { --tr-region-color: #34d399; }
+  .tr-r-trans   { --tr-region-color: #c084fc; }
+  .tr-r-actions { --tr-region-color: #fb923c; }
+  body.annotate .tr-region {
+    outline: 1.5px dashed var(--tr-region-color);
+    outline-offset: 3px; border-radius: 6px;
+  }
+  body.annotate .tr-region::after {
+    content: attr(data-region);
+    position: absolute; top: -13px; left: 0; z-index: 3;
+    font-size: 10px; font-weight: 700; line-height: 1; letter-spacing: .04em;
+    white-space: nowrap; color: #08131f;
+    background: var(--tr-region-color);
+    padding: 3px 6px; border-radius: 3px; pointer-events: none;
+  }
+  body.annotate .tr-r-head::after { left: auto; right: 0; }
+  body.annotate .tr-body,
+  body.annotate .tr-translated,
+  body.annotate .tr-actions { margin-top: 26px; }
+
+  /* ---------- 12.5 左侧新增的形态切换按钮组：占满一行、两段等宽 ---------- */
+  .tr-mode-group { width: 100%; }
+  .tr-mode-group button { flex: 1 1 0; }
+
+  @media (max-width: 420px) {
+    .tr-card { padding: 14px; }
+  }
 </style>
 </head>
 <body data-theme="dark">
@@ -963,6 +1110,32 @@ X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行
             <button class="ghost" id="mediaClear" type="button">移除</button>
           </div>
         </div>
+      </section>
+
+      <!-- ===== v1.1.0 新增：翻译卡编辑区（纯追加，不改上面任何字段） =====
+           两栏都能直接打字；形态切换是 GUI 按钮组，不写代码 / 不改配置。 -->
+      <section class="ed-group">
+        <h3 class="ed-group-title">翻译卡（新增）</h3>
+
+        <div class="field">
+          <span class="group-label">演示形态</span>
+          <div class="btn-group tr-mode-group" id="trModeGroup" role="group" aria-label="翻译卡形态">
+            <button type="button" data-tr-mode="classic" class="on">经典手动版</button>
+            <button type="button" data-tr-mode="auto">2026 自动版</button>
+          </div>
+          <p class="hint">经典：正文下方「翻译帖子」，点开才出译文；自动：译文默认显示，可切「显示原文」。</p>
+        </div>
+
+        <div class="field">
+          <label for="trOriginalInput">英文原文</label>
+          <textarea id="trOriginalInput" rows="4" spellcheck="false">Most people never search. X's post page looks complex, but it breaks down into just three parts: header, body, and actions.</textarea>
+        </div>
+
+        <div class="field">
+          <label for="trTranslatedInput">中文译文</label>
+          <textarea id="trTranslatedInput" rows="4" spellcheck="false">大多数人不会去搜索。X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行。</textarea>
+        </div>
+        <p class="hint">两栏都能直接改，右侧翻译卡实时同步；本卡不进入「导出图片」的 PNG，仅用于课堂演示。</p>
       </section>
     </aside>
 
@@ -1163,6 +1336,91 @@ X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行
               <button class="action action-share" type="button" aria-label="分享">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M12 15V3M12 3l-4 4M12 3l4 4M5 12v8h14v-8"/>
+                </svg>
+              </button>
+            </footer>
+          </article>
+
+          <!-- ================= 翻译演示卡（v1.1.0 纯追加） =================
+               放在现有帖子卡下面，作为「时间线里的下一条英文帖子」。
+               整块用独立 id / class（tr- 前缀），不复用、不改动上面任何节点：
+                 · 导出 buildExportSvg() 只克隆 profileCard / postCard，
+                   所以这张卡不会进入现有两档 PNG；
+                 · 主题靠现有 CSS 变量自动跟随；
+                 · 结构标注用独立 .tr-region 配色。
+               两种 X 翻译形态都写在 DOM 里，用 hidden 切换，不重建节点。 -->
+          <article class="tr-card" id="translationCard" aria-label="英文帖子翻译演示卡">
+
+            <header class="tr-head tr-region tr-r-head" data-region="头部区">
+              <div class="tr-avatar">
+                <img id="trAvatarImg" alt="" hidden />
+                <span id="trAvatarLetter">林</span>
+              </div>
+              <div class="tr-head-main">
+                <div class="tr-name-line">
+                  <span class="tr-name" id="trDisplayName">林知远</span>
+                  <span class="tr-badge" id="trVerifiedBadge" aria-label="已认证">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path fill="#1d9bf0" d="M22.25 12c0-1.43-.88-2.67-2.19-3.34.46-1.39.2-2.9-.81-3.91s-2.52-1.27-3.91-.81c-.66-1.31-1.91-2.19-3.34-2.19s-2.67.88-3.33 2.19c-1.4-.46-2.91-.2-3.92.81s-1.26 2.52-.8 3.91c-1.31.67-2.2 1.91-2.2 3.34s.89 2.67 2.2 3.34c-.46 1.39-.21 2.9.8 3.91s2.52 1.26 3.91.81c.67 1.31 1.91 2.19 3.34 2.19s2.67-.88 3.34-2.19c1.39.45 2.9.2 3.91-.81s1.27-2.52.81-3.91c1.31-.67 2.19-1.91 2.19-3.34z"/>
+                      <path fill="#fff" d="M9.95 16.35l-3.6-3.6 1.4-1.4 2.2 2.2 5.3-5.3 1.4 1.4z"/>
+                    </svg>
+                  </span>
+                </div>
+                <div class="tr-meta-line">
+                  <span class="tr-handle" id="trHandleText">@lin_zhiyuan</span>
+                  <span>·</span>
+                  <time class="tr-time" id="trTimeText">下午 2:14 · 2026年11月7日</time>
+                </div>
+              </div>
+            </header>
+
+            <!-- ===== 形态 A：经典手动版（默认） =====
+                 X 旧版：英文正文下方一行蓝色「翻译帖子」链接，
+                 点击后才在下方展开译文，并标注「由 Google 翻译自英语」。 -->
+            <div id="trModeClassic">
+              <div class="tr-body tr-region tr-r-orig" id="trOriginalClassic"
+                   data-region="英文原文">Most people never search. X's post page looks complex, but it breaks down into just three parts: header, body, and actions.</div>
+              <button class="tr-link" id="trTranslateBtn" type="button">翻译帖子</button>
+              <div class="tr-translated tr-region tr-r-trans" id="trTranslatedBox"
+                   data-region="中文译文" hidden>
+                <div class="tr-credit">由 Google 翻译自英语</div>
+                <div class="tr-translated-text" id="trTranslatedClassic">大多数人不会去搜索。X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行。</div>
+              </div>
+            </div>
+
+            <!-- ===== 形态 B：2026 自动翻译版（默认隐藏） =====
+                 译文默认显示，顶部标注「翻译自英语」，
+                 右侧「显示原文」可在 译文 / 英文原文 之间来回切。 -->
+            <div id="trModeAuto" hidden>
+              <div class="tr-auto-bar">
+                <span>翻译自英语 · 由 Google 翻译</span>
+                <button class="tr-link" id="trShowOriginalBtn" type="button">显示原文</button>
+              </div>
+              <div class="tr-body tr-region tr-r-trans" id="trAutoBody"
+                   data-region="中文译文">大多数人不会去搜索。X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行。</div>
+            </div>
+
+            <!-- 互动行：简化版（只有图标），让卡片看起来是一条完整帖子。
+                 全部是内联 SVG，不引外链、不进导出。 -->
+            <footer class="tr-actions tr-region tr-r-actions" data-region="互动区">
+              <button class="tr-action" type="button" aria-label="回复">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 12.5c0-4.1 3.3-7.2 8-7.2s8 3.1 8 7.2-3.3 7.2-8 7.2c-.9 0-1.8-.1-2.6-.4L6 20.2l.9-3.3C5 15.7 4 14.2 4 12.5z"/>
+                </svg>
+              </button>
+              <button class="tr-action" type="button" aria-label="转推">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 8h11l-2.5-2.5M18 16H7l2.5 2.5"/>
+                </svg>
+              </button>
+              <button class="tr-action" type="button" aria-label="点赞">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 20s-7-4.4-7-9.2c0-2.2 1.7-3.9 3.9-3.9 1.3 0 2.5.7 3.1 1.7.6-1 1.8-1.7 3.1-1.7 2.2 0 3.9 1.7 3.9 3.9C19 15.6 12 20 12 20z"/>
+                </svg>
+              </button>
+              <button class="tr-action" type="button" aria-label="查看">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 20v-5M10 20V10M15 20v-6M20 20V5"/>
                 </svg>
               </button>
             </footer>
@@ -2042,6 +2300,160 @@ X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行
     if (composing) return;
     render();
   }, 30000);
+
+  /* ==========================================================
+     10. 翻译演示卡（v1.1.0 新增 · 纯追加段）
+     ----------------------------------------------------------
+     这一整段都是新代码，不修改上面任何函数 / 分支 / 变量：
+       · 现有 render() 不碰，翻译卡有自己的 trRender()；
+       · 现有 viewButtons 监听器不碰，另外叠加一个管翻译卡显隐；
+       · 现有 buildExportSvg() 的 clones 不碰，翻译卡天然不进 PNG；
+       · 现有 composing 变量直接复用（同一函数作用域），中文合成期一起跳过。
+
+     【本课教学点】给一个「不许改旧代码」的页面接新功能，靠的是
+       addEventListener 可挂多个监听器（事件叠加）+ MutationObserver 观察旧节点，
+       而不是回头去改旧函数 —— 旧功能的回归风险因此为零。
+     ========================================================== */
+  var trOriginalInput = $('trOriginalInput');
+  var trTranslatedInput = $('trTranslatedInput');
+  var trModeGroup = $('trModeGroup');
+  var translationCard = $('translationCard');
+
+  var trModeClassic = $('trModeClassic');
+  var trModeAuto = $('trModeAuto');
+  var trOriginalClassic = $('trOriginalClassic');
+  var trTranslatedClassic = $('trTranslatedClassic');
+  var trTranslatedBox = $('trTranslatedBox');
+  var trTranslateBtn = $('trTranslateBtn');
+  var trAutoBody = $('trAutoBody');
+  var trShowOriginalBtn = $('trShowOriginalBtn');
+
+  var trDisplayName = $('trDisplayName');
+  var trHandleText = $('trHandleText');
+  var trVerifiedBadge = $('trVerifiedBadge');
+  var trTimeText = $('trTimeText');
+  var trAvatarImg = $('trAvatarImg');
+  var trAvatarLetter = $('trAvatarLetter');
+
+  var trMode = 'classic';       // classic | auto
+  var trClassicOpen = false;    // 经典版：译文是否已展开
+  var trShowOriginal = false;   // 自动版：是否正在显示英文原文
+
+  /* 10.1 两栏输入 → 卡里的原文 / 译文，实时同步。
+         用 textContent 而不是 innerHTML，和现有 render() 同一条安全约定。 */
+  function trRender() {
+    var original = trOriginalInput.value;
+    var translated = trTranslatedInput.value;
+    trOriginalClassic.textContent = original;
+    trTranslatedClassic.textContent = translated;
+    // 自动版正文：显示原文还是译文，由交互状态决定
+    trAutoBody.textContent = trShowOriginal ? original : translated;
+  }
+
+  [trOriginalInput, trTranslatedInput].forEach(function (el) {
+    el.addEventListener('compositionstart', function () { composing = true; });
+    el.addEventListener('compositionend', function () { composing = false; trRender(); });
+    el.addEventListener('input', function () { if (composing) return; trRender(); });
+  });
+
+  /* 10.2 头部跟随现有主数据：昵称 / handle / 认证 / 时间。
+         不改 render()，改用「在现有控件上叠加监听」的方式同步。 */
+  function trSyncHeader() {
+    var name = nameInput.value.trim() || '未命名';
+    trDisplayName.textContent = name;
+    trHandleText.textContent = '@' + handleInput.value.trim().replace(/^@+/, '');
+    trVerifiedBadge.hidden = !verifiedToggle.checked;
+    trTimeText.textContent = timeText.textContent;   // 复用现有卡算好的相对时间
+    trAvatarLetter.textContent = Array.from(name)[0] || '?';
+  }
+
+  [nameInput, handleInput].forEach(function (el) {
+    el.addEventListener('input', function () { if (composing) return; trSyncHeader(); });
+    el.addEventListener('compositionend', trSyncHeader);
+  });
+  verifiedToggle.addEventListener('change', trSyncHeader);
+  // 「随机 / 恢复示例」会改昵称、handle、时间：叠加一个监听器，
+  // setTimeout 0 保证排在原监听器（先 render）之后，读到的是新值。
+  ['rollBtn', 'resetBtn'].forEach(function (id) {
+    $(id).addEventListener('click', function () { setTimeout(trSyncHeader, 0); });
+  });
+
+  /* 10.3 头像跟随：不改 setAvatarImage()，用 MutationObserver 盯旧头像节点。
+         无论「字母 / 本地上传 / 在线生成」哪条路径，最终都会改 avatarImg 的
+         src / hidden，观察者都能捕获，翻译卡头像自动同步。 */
+  function trSyncAvatar() {
+    var src = avatarImg.getAttribute('src');
+    var has = !!src && !avatarImg.hidden;
+    if (has) trAvatarImg.src = src;
+    else trAvatarImg.removeAttribute('src');
+    trAvatarImg.hidden = !has;
+    trAvatarLetter.hidden = has;
+  }
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(trSyncAvatar).observe(avatarImg, {
+      attributes: true, attributeFilter: ['src', 'hidden']
+    });
+  }
+
+  /* 10.4 交互：经典版「翻译帖子 / 隐藏翻译」 */
+  trTranslateBtn.addEventListener('click', function () {
+    trClassicOpen = !trClassicOpen;
+    trTranslatedBox.hidden = !trClassicOpen;
+    trTranslateBtn.textContent = trClassicOpen ? '隐藏翻译' : '翻译帖子';
+    flash(this);
+  });
+
+  /* 10.5 交互：自动版「显示原文 / 显示翻译」 */
+  trShowOriginalBtn.addEventListener('click', function () {
+    trShowOriginal = !trShowOriginal;
+    trShowOriginalBtn.textContent = trShowOriginal ? '显示翻译' : '显示原文';
+    trAutoBody.textContent = trShowOriginal ? trOriginalInput.value : trTranslatedInput.value;
+    trAutoBody.setAttribute('data-region', trShowOriginal ? '英文原文' : '中文译文');
+    trAutoBody.classList.toggle('tr-r-orig', trShowOriginal);
+    trAutoBody.classList.toggle('tr-r-trans', !trShowOriginal);
+    flash(this);
+  });
+
+  /* 10.6 形态切换：两种 X 翻译界面由左侧 GUI 按钮组切换。
+         切换时把各自的交互状态复位，保证每次演示都从干净初始态开始。 */
+  function trSetMode(mode) {
+    trMode = mode;
+    trModeClassic.hidden = (mode !== 'classic');
+    trModeAuto.hidden = (mode !== 'auto');
+    // 复位
+    trClassicOpen = false;
+    trTranslatedBox.hidden = true;
+    trTranslateBtn.textContent = '翻译帖子';
+    trShowOriginal = false;
+    trShowOriginalBtn.textContent = '显示原文';
+    trAutoBody.setAttribute('data-region', '中文译文');
+    trAutoBody.classList.remove('tr-r-orig');
+    trAutoBody.classList.add('tr-r-trans');
+    trRender();
+    Array.prototype.forEach.call(trModeGroup.querySelectorAll('button'), function (b) {
+      b.classList.toggle('on', b.dataset.trMode === mode);
+    });
+  }
+  Array.prototype.forEach.call(trModeGroup.querySelectorAll('button'), function (btn) {
+    btn.addEventListener('click', function () {
+      trSetMode(btn.dataset.trMode);
+      flash(btn);
+    });
+  });
+
+  /* 10.7 视图切换叠加：不改现有 viewButtons 监听器，另挂一个管翻译卡。
+         翻译卡是「帖子」的一部分，跟 postCard 同显隐：
+         选「主页头部」时隐藏，其余显示。 */
+  document.querySelectorAll('[data-view-btn]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      translationCard.hidden = (btn.dataset.viewBtn === 'profile');
+    });
+  });
+
+  /* 10.8 初始化（此时上面的 render() 已跑过，timeText 有值） */
+  trSyncHeader();
+  trSyncAvatar();
+  trSetMode('classic');   // 默认经典手动版
 })();
 </script>
 </body>
