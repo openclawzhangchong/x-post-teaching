@@ -1066,6 +1066,29 @@
     padding: 2px 8px; white-space: nowrap;
     pointer-events: none;
   }
+
+  /* ============================================================
+     15. v1.2.1 窄屏横向溢出修复（纯追加，旧规则一行不动）
+     ------------------------------------------------------------
+     现象：375 竖屏下 documentElement.scrollWidth = 380，比 clientWidth
+     多 5px，页面能左右晃动；360 下更明显（多 20px）。
+     根因：@media (max-width:880px) 里 .app 写的是 1fr，而 1fr 的最小
+     尺寸是 auto（= min-content）。编辑面板 / 工具条 / 预览底板里最宽的
+     一行内容把单列轨道撑到 364px，比 .shell 的可用宽度 343px 还宽，
+     于是整列右边界顶到 380px —— 溢出的是「轨道」，不是某个元素。
+     修法：minmax(0, 1fr) 允许轨道收缩到 0；再给 .app 的直接子项
+     .editor / .stage 与 .preview 加 min-width:0，挡住 grid item 默认
+     min-width:auto 的二次撑开。
+     为什么敢这么改（四条护栏）：
+       ① 规则放在样式表最后，v1.0.1 的 122 条旧 CSS 一条不改；
+       ② 是 @media，collectCss() 会跳过 MEDIA_RULE，不进导出 SVG；
+       ③ 只在 ≤880px 生效，≥881px 仍是 340px minmax(0,1fr) 两列；
+       ④ 实测 414 / 768 / 1024 / 1440 的网格列宽与改前完全一致。
+     ============================================================ */
+  @media (max-width: 880px) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+    .editor, .stage, .preview { min-width: 0; }
+  }
 </style>
 </head>
 <body data-theme="dark">

@@ -1,5 +1,56 @@
 # 发布记录
 
+## v1.2.1 — 2026-11-11
+
+补丁版本：修复 375 竖屏自 v1.0.1 起存在的 5px 横向溢出；**纯追加一条 `@media`，旧代码 / 导出 PNG 零改动**。
+
+### 现象与根因
+
+- 用户拍板「那个 5px 溢出既然有影响你就修复就好」。
+- 现象：375 竖屏 `documentElement.scrollWidth = 380`、`clientWidth = 375`，页面能左右晃动；360 下多 20px。v1.0.1 起就存在，v1.1.x / v1.2.0 因「现有不要动」约束一直保留。
+- 根因：`@media (max-width:880px)` 里 `.app` 写的是 `grid-template-columns: 1fr`，而 **`1fr` 的最小尺寸是 `auto`（= min-content）**。编辑面板 / 工具条 / 预览底板里最宽一行内容把单列轨道撑到 `364.109px`，比 `.shell` 可用宽度 `343px` 还宽，整列右边界顶到 380px —— 溢出的是「网格轨道」，不是某个元素。
+
+### 修法（纯追加，四条护栏）
+
+```css
+@media (max-width: 880px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .editor, .stage, .preview { min-width: 0; }
+}
+```
+
+| 护栏 | 说明 |
+| --- | --- |
+| 旧 CSS 零改动 | 规则追加在样式表最后，v1.0.1 的 122 条规则一条不改（专项实测 `oldRules=122` → `newRules=180`、`appended=58`，仅比 v1.2.0 多 1 条） |
+| 导出零变化 | 是 `@media`，`collectCss()` 跳过 `MEDIA_RULE`，不进导出 SVG；真 PNG 与 v1.0.1 像素差 0、sha1 同为 `453d8eda3e9154dfa38b400a53018aa6f8f8b37b` |
+| 宽屏零影响 | 只在 ≤880px 生效；实测 414 / 768 / 1024 / 1440 的网格列宽与改前完全一致 |
+| 防二次撑开 | `.editor` / `.stage` / `.preview` 加 `min-width:0`，挡住 grid item 默认 `min-width:auto` |
+
+### 验证
+
+- 新增 `verify_v121.js` 专项 **10/10 PASS**：375 / 360 零溢出、四档宽屏不受影响、轨道 343px、旧 CSS 原样、新增规则是末尾 MEDIA_RULE、`@media` 不进 SVG、导出 PNG 像素零变化、v1.2.0 功能仍在、无报错
+- 本地回归：`verify_v110.js` **18/18**（响应式断言口径同步为「零溢出且优于基线」）、`verify_v120.js` **17/17**、`verify_mask.js` **9/9**、`verify_counts.js` **9/9**，合计 **63/63**
+- 线上：GitHub Pages / here.now 各跑专项 + 回归
+
+### 已知既有项（未处理）
+
+- **320 极窄屏仍有约 34px 横向溢出**：根因不同 —— 帖子 / 翻译卡互动行 6 个操作按钮在极窄屏不换行（`.action-bookmark` / `.action-share` 顶到 354px）。本次未擅自扩大改动范围，留待单独拍板。
+- 翻译卡仍不进入导出 PNG；就地编辑开关默认关闭。
+
+### 改动文件
+
+| 文件 | 变化 |
+| --- | --- |
+| `index.html` | 114,331 → 115,834 bytes；`</style>` 前纯追加 1 条 `@media`（含教学注释），旧代码一行未动 |
+| `README.md` | 版本行 / 功能 / 技术实现同步到 v1.2.1 |
+| `教案.md` | 常见坑速查表补 1 行 |
+| `RELEASE_NOTES.md` | 本节 |
+
+### 在线地址
+
+- https://openclawzhangchong.github.io/x-post-teaching/
+- https://frosty-lichen-w688.here.now/
+
 ## v1.2.0 — 2026-11-11
 
 功能版本：编辑面板分组导航 / 折叠 + 默认关闭的受限就地编辑；教案新增第 8 课。
