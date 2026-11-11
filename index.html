@@ -1133,6 +1133,28 @@
   .vd-note.vd-ok  { color: var(--green); }
   .vd-note.vd-err { color: var(--pink); }
 
+  /* ============================================================
+     13. 极窄屏互动行换行（v1.3.1 · 纯追加段）
+     ------------------------------------------------------------
+     现象：320 视口下 documentElement.scrollWidth = 354，比 clientWidth
+     320 多出 34px，页面能左右晃动。v1.2.1 已修过 375 的 5px 溢出，
+     但那一版是「grid 轨道被 min-content 撑开」，和这次根因不同。
+
+     诊断（diag_320_v131.js 实测）：320 下溢出元素共 10 个，全部来自
+     .post-actions / .tr-actions 里的 action-bookmark、action-share
+     及其数字 / svg —— 6 个操作按钮排成一行不肯换，最右顶到 354.1px。
+     注意 v1.3.0 新增的 .vd-bar 不是溢出源（宽 288，在可用 288px 内），
+     .vd-spec 也只有 193.2px，所以不需要动视频导出条。
+
+     修法：只在 ≤360px 让互动行折行，并给行间留 8px。
+     360 / 375 / 414 / 768 / 1024 / 1440 一档都不受影响。
+     纯追加 1 条 @media，旧规则 / DOM / JS / 导出 PNG 全部零改动；
+     collectCss() 会跳过 MEDIA_RULE，这条规则也不会进导出 SVG。
+     ============================================================ */
+  @media (max-width: 360px) {
+    .post-actions, .tr-actions { flex-wrap: wrap; row-gap: 8px; }
+  }
+
 </style>
 </head>
 <body data-theme="dark">

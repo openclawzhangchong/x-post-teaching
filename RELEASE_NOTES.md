@@ -1,5 +1,47 @@
 # 发布记录
 
+## v1.3.1 — 2026-11-11
+
+补丁版本：修复 **320 极窄屏约 34px 横向溢出**；**纯追加 1 条 `@media`，旧 CSS / DOM / JS / 导出 PNG 零改动。**
+
+### 需求来源
+
+v1.2.1 修完 375 竖屏 5px 后，交付时主动标注「320 极窄屏仍有约 34px 溢出，根因不同，未擅自扩大改动」。
+用户拍板：「开工」。
+
+### 根因（`diag_320_v131.js` 实测，不是猜的）
+
+- 320 视口 `documentElement.scrollWidth = 354`，比 `clientWidth 320` 多 **34px**
+- 溢出元素 10 个，**全部**来自 `.post-actions` / `.tr-actions`：`action-bookmark`、`action-share` 及其 count / svg
+- 6 个操作按钮默认 `flex-wrap: nowrap`，最右顶到 `354.1px`
+- 与 v1.2.1 的 5px **根因不同**（那是窄屏 `.app` 的 `1fr` 轨道被 `min-content` 撑开），所以不能复用那条规则
+- 顺带核实：**v1.3.0 新增的 `.vd-bar` 不是溢出源**（宽 288，在可用 288px 内），`.vd-spec` 193.2px 也没超 → 不动视频条
+
+### 修法
+
+```css
+@media (max-width: 360px) {
+  .post-actions, .tr-actions { flex-wrap: wrap; row-gap: 8px; }
+}
+```
+
+### 四条护栏（可验证）
+
+1. **旧 CSS 零改动**：v1.3.0 的 191 条规则逐条原样，v1.0.1 的 122 条也原样；只末尾多 1 条 `MEDIA_RULE`
+2. **只 ≤360px 生效**：375 / 414 / 768 / 1024 / 1440 互动行仍 `nowrap`，列宽与 v1.3.0 逐档一致
+3. **不进导出 SVG**：`collectCss()` 跳过 `MEDIA_RULE`，导出串里 `hasMedia=false`
+4. **PNG 像素不变**：sha1 `453d8eda3e9154dfa38b400a53018aa6f8f8b37b` 与 v1.0.1 基线一致
+
+### 验证
+
+| 层 | 结果 |
+| --- | --- |
+| 新增专项 `verify_v131.js` | **10/10 PASS** |
+| 本地全回归（v110 / v120 / v121 / mask / counts / v130 / linkage / online_tr） | **99/99 PASS** |
+| 本地合计 | **109/109 PASS** |
+| 320 实测 | `scrollWidth 320` / `clientWidth 320`，溢出元素 **0**，互动行 `wrap`，6 个按钮全部可见 |
+| v1.3.0 视频 | 未被破坏：1,424,985 B / 300 帧 / 10 关键帧 / 9:16 |
+
 ## v1.3.0 — 2026-11-11
 
 功能版本：在「导出图片」基础上新增**导出 9:16 竖屏、固定 10 秒的真 MP4**；走 **WebCodecs `VideoEncoder` + 手写内联 MP4 封装器**，不引库 / 不联网 / 约 1 秒出片。**旧导出 PNG 像素零变化。**
