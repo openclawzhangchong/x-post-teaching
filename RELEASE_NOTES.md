@@ -1,5 +1,77 @@
 # 发布记录
 
+## v1.3.0 — 2026-11-11
+
+功能版本：在「导出图片」基础上新增**导出 9:16 竖屏、固定 10 秒的真 MP4**；走 **WebCodecs `VideoEncoder` + 手写内联 MP4 封装器**，不引库 / 不联网 / 约 1 秒出片。**旧导出 PNG 像素零变化。**
+
+### 需求与拍板
+
+用户原话：「现在导出图片的基础上增加新功能，就是可以将导出的图片变成手机竖屏16:9,的mp4,默认10秒视频导出。」
+查证后澄清「手机竖屏」= **9:16**（16:9 是横屏），用户最终拍板：
+
+> 「9:16 竖屏，固定 10 秒，极缓慢缩放，contain 居中留白，常驻按钮，V2 WebCodecs VideoEncoder + 内联 MP4 封装」
+
+### 技术选型
+
+| 路线 | 结论 |
+| --- | --- |
+| V1 `MediaRecorder` + `captureStream` | 能力探针证明 Edge 157 能录出 `ftypisom` 真 MP4，但**必须实时等 10 秒**，不选 |
+| **V2 `WebCodecs VideoEncoder` + 内联 MP4 封装** | **用户选定**；300 帧约 0.9 秒出片 |
+| V3 WebM 改后缀 / `ffmpeg.wasm` | 明确不做（假 MP4 / 破坏单文件无 CDN） |
+
+前置能力探针（`probe_mp4.js`）：`video/mp4;codecs=avc1.42E01E` 支持、`VideoEncoder`/`VideoFrame` 均为 `function`、实测 `MediaRecorder` 得到 `ftypisom`。
+集成前另跑独立原型（`proto_v130.html` + `proto_v130.js`）两阶段验证，确认「真 MP4 且能播」后才写进成品：
+
+| 阶段 | 参数 | 产物 | `<video>` 验证 |
+| --- | --- | --- | --- |
+| 小规模 | 360×640 / 15fps / 2s | 229,497 B，30 帧 / 2 关键帧 | duration 2 / 360×640 / 可播可 seek |
+| 成品参数 | 720×1280 / 30fps / 10s | 2,853,984 B，300 帧 / 10 关键帧 | duration 10 / 720×1280 / 可播可 seek |
+
+另跑 `probe_png_frame.js` 排掉三个风险：真实导出 PNG 位图画进**离屏 canvas 不污染**、`new VideoFrame(offscreen)` 可用、编码出 `key/delta/delta` + 38 字节 `avcC`。
+
+### 实现（三处纯追加，旧代码一行未动）
+
+| 位置 | 内容 |
+| --- | --- |
+| `</style>` 前 | `.vd-*` CSS：常驻导出条、蓝色胶囊按钮、规格文案、进度条、状态色 |
+| `<div class="preview">` 前 | `#vdBar`：与两条工具条**平级**，不放进 `.toolbar`（保护旧 `outerHTML` 基线） |
+| IIFE 内部末尾 | 视频导出模块：`VdBuf` 大端写入器、`vdAvccFromKey` / `vdAnnexbToAvcc` 兜底、`vdBuildMoov`、`vdMuxMp4`、`vdRasterize`、`vdDrawFrame`、`vdMakeMp4` |
+
+四条边界：① 只**调用** `buildExportSvg()`，`buildExportSvg()` / `exportCard()` / `collectCss()` 一个字符不改；② 视频画布离屏，导出克隆只取两张旧卡；③ `window.__vd` 只读状态窗口，不参与渲染；④ 能力检测失败给中文提示，不白屏。
+
+MP4 结构手写：`ftyp(32) + moov(1869) + mdat`，`avcC` 取自 `decoderConfig.description`（38 B，AVCC），`timescale = fps×1000 = 30000`，`sample_delta = 1000`，`stss` 10 个关键帧，`stco` 用「先填 0 建一遍算长度、再回填绝对偏移」两遍构建；`latencyMode:'realtime'` 禁 B 帧，故可省 `ctts`。
+
+### 验证
+
+- 新增 `verify_v130.js` 专项 **18/18**、新增 `verify_v130_linkage.js` 联动专项 **6/6**
+- 本地全回归：`verify_v110.js` 18/18、`verify_v120.js` 17/17、`verify_v121.js` 10/10、`verify_mask.js` 9/9、`verify_counts.js` 9/9、`verify_online_tr.js` 12/12，合计 **99/99 PASS**
+- 关键实测：产物 1,424,985 B，头 `00 00 00 20 ... ftypisom`；`300 帧 / 10 关键帧 / avcC 38B / 无 Annex B`；编码+封装 917–953 ms；`<video>` duration 10 / 720×1280 / readyState 4 / 可 seek 到 5s
+- 画面语义：首帧四角 `[10,14,20]`（= 主题背景色，contain 留白未裁切）；亮区 bbox 首帧 `[118,562,590,714]` → 末帧 `[108,560,598,716]`，宽度 **472 → 490，比值 1.0381 ≈ 1.04**
+- 联动：浅色主题视频首帧四角 `[239,241,245]`；范围 both 高度 `299 → 631`；边距 64 宽度 `662 → 694`；勾选打码后视频使用的 SVG 同样含 `is-masked`
+- 导出隔离：PNG sha1 `453d8eda3e9154dfa38b400a53018aa6f8f8b37b` 与 v1.0.1 基线一致；导出 SVG 不含 `@media` / `vdBar` / 翻译卡；两条工具条 `outerHTML` 逐字符不变；375 / 360 竖屏仍零溢出
+
+### 同步的回归口径
+
+`verify_v121.js` 原写死「相对 v1.0.1 恰好新增 58 条 CSS 规则、且 v1.2.1 的 `@media` 是最后一条」。v1.3.0 末尾又追加规则，两条必然变红。
+已把口径改为「前 122 条旧规则原样 + 新增数 ≥ 58 + 能在规则表里找到那条 `@media`」——**保护意图（旧 CSS 零改动、窄屏修复没被删）不变**，只是不再假设自己是最后一版。
+
+### 已知既有项（未处理）
+
+- **320 极窄屏约 34px 横向溢出**（互动行 6 个按钮不换行），根因与 v1.2.1 修的不同，仍未擅自扩大改动范围。
+- **浏览器兼容**：`VideoEncoder` 的 H.264 配置在 Edge / Chrome 可用；Safari / Firefox 可能不支持，页面会给「当前浏览器不支持 WebCodecs H.264，请改用 Edge / Chrome」中文提示。
+- 翻译卡仍不进入导出 PNG（也不进入视频）；就地编辑开关默认关闭。
+
+### 改动文件
+
+| 文件 | 变化 |
+| --- | --- |
+| `index.html` | 115,834 → 138,349 bytes；CSS / HTML / JS 三处纯追加 |
+| `教案.md` | 新增第 9 课「WebCodecs 与手写 MP4 封装」+ 速查表补 7 行 |
+| `README.md` | 版本 / 功能 / 技术实现 / 教学目录同步到 v1.3.0 |
+| `RELEASE_NOTES.md` | 新增本节 |
+
+---
+
 ## v1.2.1 — 2026-11-11
 
 补丁版本：修复 375 竖屏自 v1.0.1 起存在的 5px 横向溢出；**纯追加一条 `@media`，旧代码 / 导出 PNG 零改动**。

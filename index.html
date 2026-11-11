@@ -1089,6 +1089,50 @@
     .app { grid-template-columns: minmax(0, 1fr); }
     .editor, .stage, .preview { min-width: 0; }
   }
+  /* ============================================================
+     12. 视频导出条（v1.3.0 · 纯追加段）
+     ------------------------------------------------------------
+     刻意不往 .toolbar / .toolbar-export 里塞按钮：这两条工具条的
+     outerHTML 是「现有零改动」回归脚本的对比项，动一下基线就红了。
+     所以另起一排 <div class="vd-bar">，与工具条平级、常驻显示。
+     整段只用 vd- 前缀，不覆盖任何旧选择器。
+     ============================================================ */
+  .vd-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+    margin-top: 10px; padding: 10px 14px;
+    background: var(--editor-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 12px;
+  }
+  .vd-primary {
+    flex: 0 0 auto;
+    font: inherit; font-size: 13px; font-weight: 700; letter-spacing: .04em;
+    color: #fff; background: var(--blue);
+    border: 1px solid var(--blue); border-radius: 999px;
+    padding: 8px 20px; cursor: pointer;
+    transition: opacity .18s ease, transform .1s ease;
+  }
+  .vd-primary:hover { opacity: .85; }
+  .vd-primary:active { transform: translateY(1px); }
+  .vd-bar.vd-busy .vd-primary { opacity: .55; pointer-events: none; }
+  .vd-spec {
+    color: var(--muted); white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .vd-progress {
+    flex: 1 1 120px; min-width: 90px; height: 4px;
+    background: var(--line); border-radius: 999px; overflow: hidden;
+  }
+  .vd-progress i {
+    display: block; height: 100%; width: 0;
+    background: var(--blue); border-radius: 999px;
+    transition: width .12s linear;
+  }
+  .vd-note { color: var(--muted); white-space: nowrap; }
+  .vd-note.vd-ok  { color: var(--green); }
+  .vd-note.vd-err { color: var(--pink); }
+
 </style>
 </head>
 <body data-theme="dark">
@@ -1348,6 +1392,16 @@ X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行
         </div>
 
         <!-- 预览底板：虚线包住，明确「下面这一块是被模拟的页面」 -->
+        <!-- ===== v1.3.0 新增：导出视频（纯追加，与工具条平级） =====
+             不放进 .toolbar：两条工具条的 outerHTML 是「现有零改动」基线。
+             常驻按钮：需求是「固定 10 秒视频导出」，不做隐藏开关。 -->
+        <div class="vd-bar" id="vdBar" role="group" aria-label="导出视频">
+          <button class="vd-primary" id="vdExportBtn" type="button">导出视频</button>
+          <span class="vd-spec">MP4 · 9:16 · 720×1280 · 10 秒 · 30fps</span>
+          <div class="vd-progress" id="vdProgress" aria-hidden="true"><i id="vdProgressFill"></i></div>
+          <span class="vd-note" id="vdNote" role="status">就绪</span>
+        </div>
+
         <div class="preview">
           <span class="preview-label">预览区 · 以下为被模拟的页面</span>
 
@@ -2834,6 +2888,459 @@ X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行
     if (e.target === ieActive.textarea || ieActive.overlay.contains(e.target)) return;
     ieCommit();
   }, true);
+  /* ==========================================================
+     12. 导出视频（v1.3.0 · 纯追加段）
+     ----------------------------------------------------------
+     需求：把「导出的图片」变成 9:16 竖屏、固定 10 秒的 MP4，
+           画面 contain 居中留白（不裁切），只做 1.00 → 1.04 的极缓慢缩放。
+
+     为什么不用 MediaRecorder 实时录 10 秒？
+       captureStream + MediaRecorder 必须真的等满 10 秒，期间还不能碰页面。
+       本页内容几乎静止，等 10 秒纯属浪费。改用 WebCodecs 的 VideoEncoder：
+       逐帧把画面喂进去、立刻拿到 H.264 压缩数据，实测 300 帧不到 1 秒出片。
+
+     难点不在「编码」，而在「封装」：
+       VideoEncoder 吐出来的是一袋 EncodedVideoChunk（裸 H.264 数据），
+       不是能双击播放的文件。必须自己按 ISO BMFF 拼出 ftyp / moov / mdat，
+       把 avcC（SPS/PPS）、每帧时长、关键帧表、chunk 绝对偏移都写对，
+       <video> 才认得。下面 12.1～12.4 就是一个不到 200 行的内联封装器，
+       不引任何库、不请求任何 CDN，保持单文件双击可运行。
+
+     四条边界（这一课最重要的工程纪律）：
+       ① 不改 buildExportSvg() / exportCard() 任何字符，只「调用」
+          buildExportSvg() 拿到和 PNG 完全相同的画面；
+       ② 视频画布是离屏 canvas，不挂进 DOM；导出克隆只取 profileCard /
+          postCard，所以 PNG 像素一个字节都不会变；
+       ③ 按钮不塞进 .toolbar，两条工具条的 outerHTML 保持基线；
+       ④ 全程 vd- 前缀，不覆盖任何旧选择器 / 旧函数 / 旧分支。
+
+     语法说明：WebCodecs 本身是较新的 API，这一段用 ES2015+ 的
+     class / Promise / async-await。前面几课用 var + function 是为了
+     讲清「数据 → 视图」，这一课开始接触现代浏览器原生能力。
+     ========================================================== */
+
+  var VD_W = 720, VD_H = 1280;        // 9:16 竖屏
+  var VD_FPS = 30, VD_SECS = 10;      // 固定 30fps / 固定 10 秒
+  var VD_FRAMES = VD_FPS * VD_SECS;   // 300 帧
+  var VD_BITRATE = 2500000;
+  var VD_CODECS = ['avc1.42E028', 'avc1.420028', 'avc1.640028',
+                   'avc1.4D4028', 'avc1.42E01E'];
+  var vdBusy = false;
+  var vdBar = $('vdBar'), vdBtn = $('vdExportBtn');
+  var vdNote = $('vdNote'), vdFill = $('vdProgressFill');
+
+  // 给课堂留一个「观察内部状态」的窗口：不参与渲染，也不进导出 DOM
+  window.__vd = {
+    version: '1.3.0',
+    last: null,
+    get supported() {
+      return typeof window.VideoEncoder === 'function' &&
+             typeof window.VideoFrame === 'function';
+    }
+  };
+
+  function vdSetNote(text, kind) {
+    vdNote.textContent = text;
+    vdNote.className = 'vd-note' + (kind ? ' vd-' + kind : '');
+  }
+  function vdProgress(p) { vdFill.style.width = Math.round(p * 100) + '%'; }
+
+class VdBuf {
+  constructor(n) { this.b = new Uint8Array(n || 1024); this.v = new DataView(this.b.buffer); this.p = 0; }
+  ensure(n) {
+    if (this.p + n <= this.b.length) return;
+    let cap = this.b.length * 2;
+    while (cap < this.p + n) cap *= 2;
+    const nb = new Uint8Array(cap);
+    nb.set(this.b.subarray(0, this.p));
+    this.b = nb; this.v = new DataView(nb.buffer);
+  }
+  u8(n)   { this.ensure(1); this.v.setUint8(this.p++, n); }
+  u16(n)  { this.ensure(2); this.v.setUint16(this.p, n); this.p += 2; }
+  i16(n)  { this.ensure(2); this.v.setInt16(this.p, n); this.p += 2; }
+  u32(n)  { this.ensure(4); this.v.setUint32(this.p, n >>> 0); this.p += 4; }
+  str(s)  { this.ensure(s.length); for (let i = 0; i < s.length; i++) this.b[this.p++] = s.charCodeAt(i) & 255; }
+  raw(a)  { this.ensure(a.length); this.b.set(a, this.p); this.p += a.length; }
+  zeros(n){ this.ensure(n); this.b.fill(0, this.p, this.p + n); this.p += n; }
+  box(type, fn) {
+    this.u32(0);
+    const start = this.p;          // type 的起始偏移
+    this.str(type);
+    if (fn) fn();
+    this.v.setUint32(start - 4, this.p - start + 4);  // 回填 whole box size
+  }
+  full(type, ver, flags, fn) {
+    this.box(type, () => { this.u32((ver << 24) | flags); if (fn) fn(); });
+  }
+  result() { return this.b.subarray(0, this.p); }
+}
+
+function vdMatrix(m) {
+  m.u32(0x00010000); m.u32(0); m.u32(0);
+  m.u32(0); m.u32(0x00010000); m.u32(0);
+  m.u32(0); m.u32(0); m.u32(0x40000000);
+}
+
+/* ==================================================================
+   12.2 avcC 兜底：正常情况下 description 由 VideoEncoder 的
+   metadata.decoderConfig.description 直接给出（AVCDecoderConfigurationRecord）。
+   万一某些实现不给，就从第一个关键帧的 AVCC 数据里把 SPS/PPS 抠出来自己拼。
+   ================================================================== */
+function vdAvccFromKey(data) {
+  let p = 0, sps = null, pps = null;
+  while (p + 4 <= data.length) {
+    const len = (data[p] << 24) | (data[p + 1] << 16) | (data[p + 2] << 8) | data[p + 3];
+    if (len <= 0 || p + 4 + len > data.length) break;
+    const nal = data.subarray(p + 4, p + 4 + len);
+    const t = nal[0] & 0x1f;
+    if (t === 7) sps = nal;
+    else if (t === 8) pps = nal;
+    p += 4 + len;
+  }
+  if (!sps || !pps) return null;
+  const b = new Uint8Array(11 + sps.length + pps.length);
+  let q = 0;
+  b[q++] = 1; b[q++] = sps[1]; b[q++] = sps[2]; b[q++] = sps[3];
+  b[q++] = 0xff;                       // 6bit reserved(111111) + lengthSizeMinusOne=3
+  b[q++] = 0xe1;                       // 3bit reserved(111) + numOfSequenceParameterSets=1
+  b[q++] = sps.length >> 8; b[q++] = sps.length & 255;
+  b.set(sps, q); q += sps.length;
+  b[q++] = 1;                          // numOfPictureParameterSets
+  b[q++] = pps.length >> 8; b[q++] = pps.length & 255;
+  b.set(pps, q); q += pps.length;
+  return b;
+}
+
+/* Annex B(00 00 00 01 起始码) → AVCC(4 字节长度前缀) 兜底转换 */
+function vdAnnexbToAvcc(data) {
+  const starts = [];
+  for (let i = 0; i + 3 < data.length; i++) {
+    if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 0 && data[i + 3] === 1) starts.push(i);
+    else if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1) { starts.push(i); }
+  }
+  if (!starts.length) return data;
+  const parts = [];
+  for (let k = 0; k < starts.length; k++) {
+    const s = starts[k];
+    const scLen = (s + 3 < data.length && data[s + 2] === 1) ? 3 : 4;
+    const e = k + 1 < starts.length ? starts[k + 1] : data.length;
+    const nal = data.subarray(s + scLen, e);
+    if (!nal.length) continue;
+    const o = new Uint8Array(4 + nal.length);
+    o[0] = nal.length >>> 24; o[1] = (nal.length >>> 16) & 255;
+    o[2] = (nal.length >>> 8) & 255; o[3] = nal.length & 255;
+    o.set(nal, 4); parts.push(o);
+  }
+  let total = 0; parts.forEach(x => total += x.length);
+  const out = new Uint8Array(total); let q = 0;
+  parts.forEach(x => { out.set(x, q); q += x.length; });
+  return out;
+}
+
+/* ==================================================================
+   12.3 moov 构造。stco 里的 chunkOffset 是「文件绝对偏移」，
+   而它依赖 moov 自身长度；好在 box 长度与 stco 的「值」无关，
+   所以先填 0 建一遍拿到长度，算出偏移后再建一遍即可。
+   ================================================================== */
+function vdBuildMoov(W, H, durationMs, timescale, durationTs, sampleDelta,
+                   samples, keyIdx, avcC, chunkOffset) {
+  const m = new VdBuf(4096);
+  m.box('moov', () => {
+    /* ---------- mvhd：整部电影的头 ---------- */
+    m.full('mvhd', 0, 0, () => {
+      m.u32(0); m.u32(0);                 // creation / modification time
+      m.u32(1000); m.u32(durationMs);     // movie timescale=1000, 时长用毫秒
+      m.u32(0x00010000);                  // rate 1.0
+      m.u16(0x0100); m.u16(0);            // volume 1.0 / reserved
+      m.u32(0); m.u32(0);
+      vdMatrix(m);
+      for (let i = 0; i < 6; i++) m.u32(0);
+      m.u32(2);                           // next_track_ID
+    });
+
+    m.box('trak', () => {
+      /* ---------- tkhd：轨道头，宽高用 16.16 定点 ---------- */
+      m.full('tkhd', 0, 7, () => {        // flags=7: enabled | in movie | in preview
+        m.u32(0); m.u32(0); m.u32(1); m.u32(0);
+        m.u32(durationMs);
+        m.u32(0); m.u32(0);
+        m.i16(0); m.i16(0); m.i16(0); m.u16(0);
+        vdMatrix(m);
+        m.u32(W << 16); m.u32(H << 16);
+      });
+
+      m.box('mdia', () => {
+        /* ---------- mdhd：媒体头，timescale 独立设，保证 30fps 整除 ---------- */
+        m.full('mdhd', 0, 0, () => {
+          m.u32(0); m.u32(0);
+          m.u32(timescale); m.u32(durationTs);
+          m.u16(0x55c4); m.u16(0);        // language = 'und'
+        });
+        m.full('hdlr', 0, 0, () => {
+          m.u32(0); m.str('vide');
+          m.u32(0); m.u32(0); m.u32(0);
+          m.str('VideoHandler\0');
+        });
+
+        m.box('minf', () => {
+          m.full('vmhd', 0, 1, () => { m.u16(0); m.u16(0); m.u16(0); m.u16(0); });
+          m.box('dinf', () => {
+            m.full('dref', 0, 0, () => { m.u32(1); m.full('url ', 0, 1, () => {}); });
+          });
+
+          m.box('stbl', () => {
+            /* stsd → avc1 → avcC（avcC 内容直接来自编码器） */
+            m.full('stsd', 0, 0, () => {
+              m.u32(1);
+              m.box('avc1', () => {
+                m.zeros(6); m.u16(1);      // reserved[6] + data_reference_index
+                m.u16(0); m.u16(0); m.zeros(12);
+                m.u16(W); m.u16(H);
+                m.u32(0x00480000); m.u32(0x00480000);   // 72 dpi
+                m.u32(0);
+                m.u16(1); m.zeros(32);      // frame_count / compressorname
+                m.u16(0x0018); m.i16(-1);  // depth 24 / pre_defined -1
+                m.box('avcC', () => { m.raw(avcC); });
+              });
+            });
+            /* stts：所有帧等长，一条 entry 搞定 */
+            m.full('stts', 0, 0, () => { m.u32(1); m.u32(samples.length); m.u32(sampleDelta); });
+            /* stss：关键帧的 1-based 序号 */
+            m.full('stss', 0, 0, () => { m.u32(keyIdx.length); keyIdx.forEach(i => m.u32(i)); });
+            /* stsc：所有 sample 塞进 1 个 chunk */
+            m.full('stsc', 0, 0, () => { m.u32(1); m.u32(1); m.u32(samples.length); m.u32(1); });
+            /* stsz：每帧字节数 */
+            m.full('stsz', 0, 0, () => { m.u32(0); m.u32(samples.length); samples.forEach(s => m.u32(s.data.length)); });
+            /* stco：那个唯一 chunk 的文件绝对偏移 */
+            m.full('stco', 0, 0, () => { m.u32(1); m.u32(chunkOffset); });
+          });
+        });
+      });
+    });
+  });
+  return m.result().slice();
+}
+
+/* ==================================================================
+   12.4 把编码后的 samples 封成完整 MP4 文件
+   文件布局： ftyp | moov | mdat(8 字节头 + 所有 sample 顺次拼接)
+   ================================================================== */
+function vdMuxMp4(W, H, fps, samples, avcC) {
+  const durationSec = samples.length / fps;
+  const durationMs  = Math.round(durationSec * 1000);
+  const timescale   = fps * 1000;            // 30fps → 30000，sample_delta 恰好 1000
+  const durationTs  = timescale * durationSec;
+  const sampleDelta = timescale / fps;       // 1000
+  const keyIdx = [];
+  samples.forEach((s, i) => { if (s.type === 'key') keyIdx.push(i + 1); });
+  if (!keyIdx.length) keyIdx.push(1);
+
+  const ftyp = new VdBuf(64);
+  ftyp.box('ftyp', () => {
+    ftyp.str('isom'); ftyp.u32(0);
+    ['isom', 'iso2', 'avc1', 'mp41'].forEach(b => ftyp.str(b));
+  });
+  const ftypB = ftyp.result().slice();
+
+  let totalSample = 0;
+  samples.forEach(s => totalSample += s.data.length);
+
+  let moov = vdBuildMoov(W, H, durationMs, timescale, durationTs, sampleDelta,
+                       samples, keyIdx, avcC, 0);
+  const chunkOffset = ftypB.length + moov.length + 8;   // mdat 头 8 字节
+  moov = vdBuildMoov(W, H, durationMs, timescale, durationTs, sampleDelta,
+                   samples, keyIdx, avcC, chunkOffset);
+
+  const mdat = new VdBuf(8 + totalSample);
+  mdat.u32(8 + totalSample); mdat.str('mdat');
+  samples.forEach(s => mdat.raw(s.data));
+  const mdatB = mdat.result();
+
+  const out = new Uint8Array(ftypB.length + moov.length + mdatB.length);
+  out.set(ftypB, 0);
+  out.set(moov, ftypB.length);
+  out.set(mdatB, ftypB.length + moov.length);
+  return { bytes: out, chunkOffset, moovLen: moov.length, totalSample, keyIdx };
+}
+
+/* 解析顶层 box：给课堂上的 __vd.last 和自测脚本看结构对不对 */
+function vdTopBoxes(u8) {
+  const out = []; let p = 0;
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  while (p + 8 <= u8.length) {
+    const size = dv.getUint32(p);
+    const type = String.fromCharCode(u8[p + 4], u8[p + 5], u8[p + 6], u8[p + 7]);
+    if (size < 8 || p + size > u8.length) break;
+    out.push({ type, size, at: p });
+    p += size;
+  }
+  return out;
+}
+
+  /* ---- 12.5 把「导出图片」的 SVG 栅格化成位图 ----
+     复用 exportCard() 一模一样的做法：SVG → Image → 2 倍 canvas。
+     范围 / 边距 / Handle 打码 / 主题 / 翻译卡不进图，全部沿用旧设置。 */
+  function vdRasterize(spec) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () {
+        var c = document.createElement('canvas');
+        c.width = spec.w * 2; c.height = spec.h * 2;
+        var x = c.getContext('2d');
+        x.fillStyle = spec.bg;
+        x.fillRect(0, 0, c.width, c.height);
+        x.drawImage(img, 0, 0, c.width, c.height);
+        resolve(c);
+      };
+      img.onerror = function () { reject(new Error('SVG 栅格化失败')); };
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(spec.svg);
+    });
+  }
+
+  /* ---- 12.6 一帧画面：contain 居中留白 + 极缓慢缩放 ----
+     contain = min(可用宽/图宽, 可用高/图高)，保证整张帖子卡都在画面里，
+     不会被 9:16 竖屏裁掉上下或左右。zoom 从 1.00 线性走到 1.04，
+     10 秒只放大 4%，是本需求要的「极缓慢」。 */
+  function vdDrawFrame(ctx, card, i, bg) {
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, VD_W, VD_H);
+    var pad = Math.round(VD_W * 0.06);
+    var t = VD_FRAMES > 1 ? i / (VD_FRAMES - 1) : 0;
+    var zoom = 1 + 0.04 * t;
+    var fit = Math.min((VD_W - pad * 2) / card.width,
+                       (VD_H - pad * 2) / card.height);
+    var dw = card.width * fit * zoom, dh = card.height * fit * zoom;
+    ctx.drawImage(card, (VD_W - dw) / 2, (VD_H - dh) / 2, dw, dh);
+  }
+
+  /* ---- 12.7 主流程：能力检测 → 编码 → 封装 → 下载 ---- */
+  async function vdMakeMp4() {
+    if (vdBusy) return;
+    if (!window.__vd.supported) {
+      vdSetNote('当前浏览器不支持 WebCodecs H.264，请改用 Edge / Chrome', 'err');
+      window.__vd.last = { ok: false, error: 'WebCodecs unavailable' };
+      return;
+    }
+    vdBusy = true;
+    vdBar.classList.add('vd-busy');
+    vdProgress(0);
+    vdSetNote('正在准备画面…');
+    var t0 = Date.now();
+
+    try {
+      var spec = buildExportSvg(exportRange, exportPad, 2);
+      var card = await vdRasterize(spec);
+
+      // 挑一个浏览器真的支持的 H.264 配置（不同版本支持的 level 不同）
+      var baseCfg = {
+        width: VD_W, height: VD_H, bitrate: VD_BITRATE, framerate: VD_FPS,
+        latencyMode: 'realtime',   // 不产生 B 帧 → DTS == CTS，可省掉 ctts
+        avc: { format: 'avc' }    // AVCC(4 字节长度前缀)，MP4 正需要这个
+      };
+      var codec = null, tried = [];
+      for (var ci = 0; ci < VD_CODECS.length; ci++) {
+        var c = VD_CODECS[ci];
+        try {
+          var sup = await VideoEncoder.isConfigSupported(
+            Object.assign({ codec: c }, baseCfg));
+          tried.push(c + '=' + (sup.supported ? 'yes' : 'no'));
+          if (sup.supported) { codec = c; break; }
+        } catch (err) { tried.push(c + '=ERR'); }
+      }
+      if (!codec) {
+        vdSetNote('找不到可用的 H.264 编码配置', 'err');
+        window.__vd.last = { ok: false, error: 'no H.264 config', tried: tried };
+        return;
+      }
+
+      // 离屏画布：不挂进 DOM，导出克隆取不到它
+      var screen = document.createElement('canvas');
+      screen.width = VD_W; screen.height = VD_H;
+      var ctx = screen.getContext('2d', { alpha: false });
+
+      var samples = [], avcC = null, encErr = null;
+      var encoder = new VideoEncoder({
+        output: function (chunk, meta) {
+          var b = new Uint8Array(chunk.byteLength);
+          chunk.copyTo(b);
+          samples.push({ data: b, type: chunk.type });
+          if (meta && meta.decoderConfig && meta.decoderConfig.description) {
+            avcC = new Uint8Array(meta.decoderConfig.description);
+          }
+        },
+        error: function (err) { encErr = String(err && err.message || err); }
+      });
+      encoder.configure(Object.assign({ codec: codec }, baseCfg));
+
+      for (var i = 0; i < VD_FRAMES; i++) {
+        vdDrawFrame(ctx, card, i, spec.bg);
+        // VideoFrame 的时间戳单位是「微秒」，不是毫秒
+        var f = new VideoFrame(screen, {
+          timestamp: Math.round(i * 1000000 / VD_FPS),
+          duration: Math.round(1000000 / VD_FPS)
+        });
+        encoder.encode(f, { keyFrame: i % VD_FPS === 0 });
+        f.close();
+        if (encoder.encodeQueueSize > 12) await encoder.flush();   // 背压
+        if (i % 30 === 0) {
+          vdProgress(i / VD_FRAMES);
+          vdSetNote('编码中 ' + Math.round(i / VD_FRAMES * 100) + '%');
+          await new Promise(function (r) { setTimeout(r, 0); });   // 让出主线程
+        }
+      }
+      await encoder.flush();
+      encoder.close();
+      if (encErr) throw new Error('编码失败：' + encErr);
+      if (!samples.length) throw new Error('没有产出任何视频帧');
+
+      // 兜底：正常路径下这两条都不会触发，留着方便换浏览器时课堂演示
+      var annexb = samples[0].data[0] === 0 && samples[0].data[1] === 0 &&
+                   samples[0].data[2] === 0 && samples[0].data[3] === 1;
+      if (annexb) {
+        samples.forEach(function (s) { s.data = vdAnnexbToAvcc(s.data); });
+      }
+      if (!avcC) {
+        var key = samples.filter(function (s) { return s.type === 'key'; })[0]
+                  || samples[0];
+        avcC = vdAvccFromKey(key.data);
+      }
+      if (!avcC) throw new Error('拿不到 avcC（SPS/PPS）');
+
+      vdProgress(0.96);
+      vdSetNote('正在封装 MP4…');
+      var mux = vdMuxMp4(VD_W, VD_H, VD_FPS, samples, avcC);
+      var blob = new Blob([mux.bytes], { type: 'video/mp4' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'x-post-' + stamp() + '.mp4';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+
+      vdProgress(1);
+      vdSetNote('已导出 ' + (mux.bytes.length / 1048576).toFixed(2) +
+                ' MB · ' + VD_SECS + ' 秒', 'ok');
+      window.__vd.last = {
+        ok: true, size: mux.bytes.length, codec: codec, tried: tried,
+        sampleCount: samples.length, keyCount: mux.keyIdx.length,
+        avcCLen: avcC.length, annexb: annexb,
+        boxes: vdTopBoxes(mux.bytes),
+        spec: { w: spec.w, h: spec.h, bg: spec.bg },
+        elapsedMs: Date.now() - t0
+      };
+    } catch (err) {
+      vdSetNote('导出失败：' + (err && err.message || err), 'err');
+      window.__vd.last = { ok: false, error: String(err && err.message || err) };
+    } finally {
+      vdBusy = false;
+      vdBar.classList.remove('vd-busy');
+    }
+  }
+
+  vdBtn.addEventListener('click', function () { flash(this); vdMakeMp4(); });
+
 })();
 </script>
 </body>
