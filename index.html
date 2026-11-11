@@ -974,6 +974,98 @@
   @media (max-width: 420px) {
     .tr-card { padding: 14px; }
   }
+
+  /* ============================================================
+     13 / 14. 分组导航折叠 + 受限就地编辑（v1.2.0 新增 · 纯追加段）
+     ------------------------------------------------------------
+     继续遵守本页「不许改旧代码」的纪律：
+       · 新选择器一律 nv- / ie- 前缀，旧规则一行不改；
+       · 折叠状态、编辑开关状态都挂在 body 上（body.nv-on / body.ie-on），
+         而导出的克隆 DOM 里没有 body —— 这些状态天然不会进 PNG；
+       · 就地编辑的浮层挂在 body 下，buildExportSvg() 只克隆两张旧卡，
+         浮层也不在克隆列表里。
+     ============================================================ */
+
+  /* ---------- 13.1 吸顶分组导航条 ---------- */
+  .nv-bar {
+    position: sticky; top: 0; z-index: 5;
+    align-self: start;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    margin: -2px 0 0; padding: 8px 0 10px;
+    background: var(--editor-bg);
+    border-bottom: 1px solid var(--line);
+  }
+  .nv-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 100%; }
+  .nv-btn {
+    font: inherit; font-size: 12px; line-height: 1;
+    color: var(--muted);
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+  }
+  .nv-btn:hover { color: var(--text); background: var(--hover); }
+  .nv-btn.on { color: var(--text); background: var(--hover); border-color: var(--blue); }
+  .nv-all { margin-left: auto; }
+
+  /* ---------- 13.2 折叠：只隐藏标题以外的直接子元素 ---------- */
+  body.nv-on .ed-group-title { cursor: pointer; user-select: none; }
+  body.nv-on .ed-group-title::after {
+    content: '-'; float: right; font-size: 13px; color: var(--muted);
+  }
+  body.nv-on .ed-group.nv-collapsed .ed-group-title::after { content: '+'; }
+  body.nv-on .ed-group.nv-collapsed > :not(.ed-group-title) { display: none; }
+  body.nv-on .ed-group.nv-collapsed { gap: 0; }
+
+  /* ---------- 14.1 就地编辑开关（放在导航条里，不动任何工具条） ---------- */
+  .ie-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    width: 100%;
+    font-size: 11px; color: var(--muted);
+    cursor: pointer; user-select: none;
+  }
+  .ie-toggle input { accent-color: var(--muted); }
+
+  /* 双击提示只在开关打开时出现；规则带 body.ie-on 前缀，
+     导出克隆的 DOM 没有 body，所以虚线框不会画进 PNG（第 6 课的再次应用） */
+  body.ie-on #postBody,
+  body.ie-on #trTranslatedClassic,
+  body.ie-on #trAutoBody {
+    outline: 1px dashed var(--blue);
+    outline-offset: 3px;
+    border-radius: 3px;
+    cursor: text;
+  }
+
+  /* ---------- 14.2 编辑浮层：挂在 body 下，不是卡片子节点 ---------- */
+  .ie-overlay {
+    position: fixed; z-index: 60; box-sizing: border-box;
+    background: var(--card-bg);   /* 不透明，隔离卡片底层内容 */
+    border-radius: 6px;
+  }
+  .ie-textarea {
+    display: block; width: 100%; height: calc(100% - 22px);
+    box-sizing: border-box; resize: none;
+    font: inherit; font-size: 14px; line-height: 1.5;
+    color: var(--text); background: var(--input-bg);
+    border: 2px solid var(--blue); border-radius: 6px;
+    padding: 6px 8px;
+    white-space: pre-wrap; overflow-wrap: break-word;
+    outline: none;
+  }
+  .ie-tip {
+    /* 整宽贴在浮层内部底边：不透明背景盖住身后的互动行，
+       避免窄条提示与卡片数字叠在一起变成视觉噪音 */
+    position: absolute; left: 0; right: 0; bottom: 0;
+    box-sizing: border-box;
+    font-size: 11px; line-height: 1.4;
+    color: var(--muted); background: var(--page-bg);
+    border: 1px solid var(--border); border-top: 0;
+    border-radius: 0 0 4px 4px;
+    padding: 2px 8px; white-space: nowrap;
+    pointer-events: none;
+  }
 </style>
 </head>
 <body data-theme="dark">
@@ -992,6 +1084,25 @@
          ========================================================== -->
     <aside class="editor" aria-label="编辑面板">
       <h2 class="editor-title">编辑面板</h2>
+
+      <!-- ===== v1.2.0 新增：分组导航 + 就地编辑开关（纯追加，不动任何旧节点） =====
+           用 <div> 而不是 <section>：旧版回归脚本按 .editor > section 计数，
+           导航条与开关都不属于「编辑分组」，不该被算进去。
+           就地编辑开关刻意不放进任何 .toolbar —— 两条工具条的 outerHTML 是
+           「现有零改动」的对比项，放进去了会破坏基线。 -->
+      <div class="nv-bar" id="nvBar">
+        <div class="nv-row">
+          <button class="nv-btn" type="button" data-nv-target="0">共用</button>
+          <button class="nv-btn" type="button" data-nv-target="1">主页</button>
+          <button class="nv-btn" type="button" data-nv-target="2">帖子</button>
+          <button class="nv-btn" type="button" data-nv-target="3">翻译</button>
+          <button class="nv-btn nv-all" type="button" id="nvToggleAll">全部收起</button>
+        </div>
+        <label class="ie-toggle" title="打开后，双击帖子正文或翻译卡译文可直接改字；默认关闭">
+          <input id="ieToggle" type="checkbox" />
+          卡片就地编辑（双击正文 / 译文直接改）
+        </label>
+      </div>
 
       <section class="ed-group">
         <h3 class="ed-group-title">共用信息</h3>
@@ -2502,6 +2613,204 @@ X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行
   trSyncAvatar();
   trSyncCounts();
   trSetMode('classic');   // 默认经典手动版
+
+  /* ==========================================================
+     11. 编辑面板分组导航与折叠（v1.2.0 · 纯追加段）
+     ----------------------------------------------------------
+     问题：4 个分组、20+ 字段挤在一个限高且内部滚动的 sticky 面板里，
+     找字段要一直往下拉。解法两步：
+       P0 顶部吸顶导航，点一下直接滚到对应分组；
+       P1 分组可折叠，默认收起两组，并提供「全部收起」一键。
+     全程不改旧 DOM / 旧 CSS / 旧函数：折叠只靠运行时 classList，
+     导航只是 addEventListener，滚动用容器 scrollTo（窄屏退回 scrollIntoView）。
+     ========================================================== */
+  var nvEditor = document.querySelector('.editor');
+  var nvGroups = Array.prototype.slice.call(nvEditor.querySelectorAll('.ed-group'));
+  var nvBar = $('nvBar');
+  var nvBtns = Array.prototype.slice.call(nvBar.querySelectorAll('[data-nv-target]'));
+  var nvToggleAll = $('nvToggleAll');
+
+  // P1：默认收起「共用信息」「主页头部」，展开「帖子」「翻译卡」
+  [0, 1].forEach(function (i) { nvGroups[i].classList.add('nv-collapsed'); });
+  document.body.classList.add('nv-on');
+
+  var nvLockUntil = 0;   // 点导航后的平滑滚动期间，禁止 scroll 监听覆盖高亮
+
+  function nvSetActive(i) {
+    nvBtns.forEach(function (b) {
+      b.classList.toggle('on', Number(b.dataset.nvTarget) === i);
+    });
+  }
+
+  function nvScrollTo(i) {
+    nvGroups[i].classList.remove('nv-collapsed');   // 先展开，否则滚过去只有一行标题
+    nvSetActive(i);
+    nvLockUntil = Date.now() + 900;                 // 平滑滚动期间锁住高亮
+    if (window.matchMedia && window.matchMedia('(min-width: 881px)').matches) {
+      var top = nvGroups[i].offsetTop - nvBar.offsetHeight - 8;
+      if (nvEditor.scrollTo) nvEditor.scrollTo({ top: top, behavior: 'smooth' });
+      else nvEditor.scrollTop = top;
+    } else {
+      nvGroups[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  nvBtns.forEach(function (b) {
+    b.addEventListener('click', function () { nvScrollTo(Number(b.dataset.nvTarget)); });
+  });
+
+  // 点分组标题切换折叠（事件叠加，旧节点结构一个属性都不加）
+  nvGroups.forEach(function (g, i) {
+    var title = g.querySelector('.ed-group-title');
+    if (!title) return;
+    title.addEventListener('click', function () {
+      g.classList.toggle('nv-collapsed');
+      nvSetActive(i);
+    });
+  });
+
+  // 一键全收 / 全展
+  nvToggleAll.addEventListener('click', function () {
+    var allCollapsed = nvGroups.every(function (g) {
+      return g.classList.contains('nv-collapsed');
+    });
+    nvGroups.forEach(function (g) { g.classList.toggle('nv-collapsed', !allCollapsed); });
+    this.textContent = allCollapsed ? '全部收起' : '全部展开';
+  });
+
+  // 滚动时更新高亮，让导航始终指向当前可视分组
+  nvEditor.addEventListener('scroll', function () {
+    if (Date.now() < nvLockUntil) return;           // 导航点击后的滚动不抢高亮
+    var line = nvEditor.scrollTop + nvBar.offsetHeight + 24;
+    var idx = 0;
+    nvGroups.forEach(function (g, i) { if (g.offsetTop <= line) idx = i; });
+    nvSetActive(idx);
+  }, { passive: true });
+
+  /* ==========================================================
+     12. 受限就地编辑（v1.2.0 · 纯追加段）
+     ----------------------------------------------------------
+     【为什么"受限"】本页核心教学点是「左边数据 → 右边视图」的单向流。
+     全面改成右侧就地编辑会破坏这个对照关系，还要把 render() 改成双向。
+     所以只做：GUI 开关默认关 + 两处纯文本 + 双击进入 + 提交后写回原 input
+     并 dispatch('input')，让改动仍走老的 render() / trRender() 通道。
+
+     【三条隔离纪律】
+       1) 不给卡片挂 contenteditable，编辑态是 body 下的独立浮层 —— 不碰卡片 DOM；
+       2) 浮层不在 buildExportSvg() 的 clones 里 —— 不进 PNG；
+       3) 提示虚线框的规则带 body.ie-on 前缀，导出克隆的 DOM 里没有 body。
+     ========================================================== */
+  var ieToggle = $('ieToggle');
+  var ieTargets = [
+    { el: $('postBody'), input: bodyInput },
+    { el: $('trTranslatedClassic'), input: trTranslatedInput },
+    { el: $('trAutoBody'), input: trTranslatedInput }
+  ];
+  var ieActive = null;       // 当前编辑会话
+  var ieComposing = false;   // 浮层自己的中文输入法合成标志
+  var ieScrollGuardUntil = 0;// 浮层刚打开时忽略 scroll 的截止时间
+
+  function ieEnabled() { return ieToggle.checked; }
+
+  function ieCommit() {
+    if (!ieActive) return;
+    if (ieComposing) { setTimeout(ieCommit, 60); return; }  // 拼音未结束，稍后再存
+    var a = ieActive;
+    ieActive = null;               // 先置空：remove 触发的 blur 进来会被直接挡掉
+    var value = a.textarea.value;
+    a.overlay.remove();
+    composing = false;             // 复用现有 IME 标志，保证老通道这次一定渲染
+    // 写回唯一数据源，再手动派发 input —— 老通道会重绘所有卡片
+    if (a.input.value !== value) {
+      a.input.value = value;
+      a.input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
+  function ieCancel() {
+    if (!ieActive) return;
+    var a = ieActive;
+    ieActive = null;
+    a.overlay.remove();
+  }
+
+  function ieOpen(el, input) {
+    if (!ieEnabled()) return;
+    if (ieActive) ieCommit();
+    // 自动版正在显示英文原文时不给编辑，避免把原文当成译文写回
+    if (el.id === 'trAutoBody' && trShowOriginal) return;
+
+    var r = el.getBoundingClientRect();
+    var cs = getComputedStyle(el);
+    var overlay = document.createElement('div');
+    overlay.className = 'ie-overlay';
+    overlay.style.left = r.left + 'px';
+    overlay.style.top = r.top + 'px';
+    overlay.style.width = r.width + 'px';
+    overlay.style.height = Math.max(r.height, 46) + 22 + 'px';  // +22 给底部整宽提示条
+
+    var ta = document.createElement('textarea');
+    ta.className = 'ie-textarea';
+    ta.value = el.textContent;
+    ta.spellcheck = false;
+    // 复制目标的关键排版，双击瞬间不跳字
+    ['fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing',
+     'padding', 'whiteSpace', 'overflowWrap'].forEach(function (k) {
+      ta.style[k] = cs[k];
+    });
+
+    var tip = document.createElement('div');
+    tip.className = 'ie-tip';
+    tip.textContent = '点外面保存 · Esc 取消 · Ctrl+Enter 保存';
+    overlay.appendChild(ta);
+    overlay.appendChild(tip);
+    document.body.appendChild(overlay);
+
+    ieActive = { el: el, input: input, overlay: overlay, textarea: ta };
+    ieScrollGuardUntil = Date.now() + 400;   // 打开瞬间忽略自动滚动，见文末 scroll 监听
+
+    ta.addEventListener('compositionstart', function () { ieComposing = true; });
+    ta.addEventListener('compositionend', function () { ieComposing = false; });
+    ta.addEventListener('blur', ieCommit);
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); ieCancel(); }
+      else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault(); ieCommit();
+      }
+    });
+    try { ta.focus({ preventScroll: true }); } catch (e) { ta.focus(); }
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+
+  // 事件叠加：旧节点一个属性都不加，只多挂一个 dblclick 监听
+  ieTargets.forEach(function (t) {
+    t.el.addEventListener('dblclick', function () { ieOpen(t.el, t.input); });
+  });
+
+  ieToggle.addEventListener('change', function () {
+    if (this.checked) document.body.classList.add('ie-on');
+    else { document.body.classList.remove('ie-on'); ieCommit(); }
+  });
+
+  // 导出兜底：点「导出图片」时 textarea 会先 blur 提交，但保险起见
+  // 在 document 捕获阶段再提交一次，保证 exportCard() 读到刚改完的文本。
+  // 点在浮层内部不提交，否则一点输入框就退出编辑。
+  document.addEventListener('click', function (e) {
+    if (!ieActive) return;
+    if (ieActive.overlay.contains(e.target)) return;
+    ieCommit();
+  }, true);
+
+  // 浮层是 fixed 定位，滚动后不会跟着目标走；一滚动就保存并退出，符合直觉。
+  // 三个例外：① 打开瞬间 focus / setSelectionRange 触发的自动滚动（用时间窗挡掉，
+  // 否则真人双击后浮层会被自己关掉）；② textarea 内部的正常文本滚动；
+  // ③ 浮层自身滚动。只有真正滚动了外部页面 / 左侧编辑面板才提交退出。
+  window.addEventListener('scroll', function (e) {
+    if (!ieActive) return;
+    if (Date.now() < ieScrollGuardUntil) return;
+    if (e.target === ieActive.textarea || ieActive.overlay.contains(e.target)) return;
+    ieCommit();
+  }, true);
 })();
 </script>
 </body>
