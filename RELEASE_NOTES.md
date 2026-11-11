@@ -1,5 +1,55 @@
 # 发布记录
 
+## v1.1.1 — 2026-11-11
+
+补丁版本：补齐翻译卡互动行的数字，并与现有主数据同步。
+
+### 现象与根因
+
+- 用户反馈（截图）：翻译卡底部互动行只有 4 个纯图标，没有回复 / 转推 / 点赞 / 查看 / 收藏的数字，看起来不像一条完整帖子。
+- 根因：v1.1.0 把翻译卡互动行做成了「简化版」占位（4 个图标 + 独立 `.tr-action` 样式），既没补齐 6 个操作，也没接现有 5 个数字输入框（`replyInput` / `repostInput` / `likeInput` / `viewInput` / `bookmarkInput`）—— 属于**功能遗漏**，不是渲染故障。
+
+### 修法（仍严格「现有零改动」）
+
+| 项 | 做法 |
+| --- | --- |
+| 结构 | 互动行补齐为与现有帖子卡一致的 **6 个操作 + 5 个数字**（回复 / 转推 / 点赞 / 查看 / 收藏带数字，分享无数字），数字用独立 `id="trCount*"` |
+| 样式 | `.tr-actions` / `.tr-action` 对齐 `.post-actions` / `.action`（`max-width: 460px`、`gap: 6px`、13px 字号、按类型悬停色），新增 `.tr-count { font-variant-numeric: tabular-nums; }` |
+| 同步 | 新增 10.8 段：在现有 5 个数字输入框上**叠加 `input` 监听**，读 `.value || '0'` 写入翻译卡；不改 `render()` 一行 |
+| 随机 / 恢复示例 | 这两个动作直接写 `.value`、不触发 `input`，故再叠 `click` + `setTimeout(..., 0)` 排在原监听器之后读新值 |
+
+- 改动位置：`index.html` 的 12.3 CSS 段、翻译卡 `<footer>`、10.8~10.9 JS 段 —— 全部位于 v1.1.0 新增区，**v1.0.1 的 DOM / CSS / JS / 导出一行未动**。
+
+### 验证
+
+- 新增 `verify_counts.js` 专项 **9/9 PASS**：结构 6+5、初始一致、5 个输入实时同步、空值兜底 0、「随机」跟随、「恢复示例」跟随、双形态一致、等宽数字与 6px 间距、无报错
+- 本地回归：`verify_v110.js` **18/18 PASS**、`verify_mask.js` **9/9 PASS**
+- **导出零变化铁证**：v1.0.1 / v1.1.0 / v1.1.1 同参数 PNG 均 `1324×598`，像素差 **0**，sha1 同为 `453d8eda3e9154dfa38b400a53018aa6f8f8b37b`
+- CSS 规则 158 → 162 条（新增 4 条 `tr-*` 规则），v1.0.1 的 122 条规则仍原样保留
+- 线上：GitHub Pages / here.now 各跑 `verify_counts.js` + `verify_online_tr.js` + `verify_mask.js`
+
+### 已知既有项（未处理）
+
+同 v1.1.0：`v1.0.1` 在 375 竖屏本就有 5px 横向溢出（老容器），按「现有不要动」约束未修；翻译卡仍不进入导出 PNG。
+
+### 改动文件
+
+| 文件 | 变化 |
+| --- | --- |
+| `index.html` | 97,591 → 100,162 bytes；12.3 CSS 段、翻译卡 footer、10.8/10.9 JS 段 |
+| `README.md` | 功能说明 / 技术实现 / 版本行同步到 v1.1.1 |
+| `教案.md` | 第 7 课补 1 条 + 常见坑速查表补 1 行 |
+| `RELEASE_NOTES.md` | 本节 |
+
+### 在线地址
+
+- GitHub Pages：https://openclawzhangchong.github.io/x-post-teaching/
+- here.now：https://frosty-lichen-w688.here.now/
+
+### 回滚
+
+`git checkout v1.1.1`（annotated tag）；回到修复前用 `git checkout v1.1.0`
+
 ## v1.1.0 — 2026-11-11
 
 功能版本：在**现有帖子卡下方**追加一张「英文 → 中文」的 X 风格翻译帖子卡。
