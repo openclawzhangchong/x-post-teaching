@@ -1155,6 +1155,43 @@
     .post-actions, .tr-actions { flex-wrap: wrap; row-gap: 8px; }
   }
 
+  /* ============================================================
+     14. 翻译卡视频导出（v1.4.0 · 纯追加段）
+     ------------------------------------------------------------
+     需求：导出的视频原来只有「帖子卡」一种画面，英文翻译卡拍不进视频。
+     解法：在「导出视频」按钮下面再加一个常驻按钮，两个按钮共用同一条
+     进度条与状态文字，只是画面来源不同。
+
+     为什么不复用 buildExportSvg()：它的 clones 写死成
+     [profileCard, postCard]（range='both'）或 [postCard]，要让它认识翻译卡
+     就得改旧函数 —— 那是「现有零改动」红线。因此另写 vdBuildTrSvg()，
+     与它同构：同样 collectCss() + 同样 foreignObject + 同样 9:16 管线。
+
+     排版：按钮竖排（.vd-actions 是列向 flex），第二个做成描边胶囊，
+     一眼能看出是「另一路画面」而不是主操作。
+     ============================================================ */
+  .vd-actions {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .vd-primary.vd-alt {
+    background: transparent;
+    color: var(--blue);
+  }
+  .vd-primary.vd-alt:hover {
+    background: rgba(29, 155, 240, .12);
+    opacity: 1;
+  }
+
+  /* 翻译卡的 @Handle 也要能打码：它用的是 .tr-handle，不是 .handle，
+     所以单独给一条同款规则（同样的 7px/7px 条纹、同样只改颜色不改宽度）。 */
+  .tr-handle.is-masked {
+    color: transparent !important;
+    background: repeating-linear-gradient(90deg,
+        var(--muted) 0 7px, var(--border) 7px 14px);
+    border-radius: 3px;
+    box-shadow: 0 0 0 1px var(--muted);
+  }
+
 </style>
 </head>
 <body data-theme="dark">
@@ -1418,7 +1455,12 @@ X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行
              不放进 .toolbar：两条工具条的 outerHTML 是「现有零改动」基线。
              常驻按钮：需求是「固定 10 秒视频导出」，不做隐藏开关。 -->
         <div class="vd-bar" id="vdBar" role="group" aria-label="导出视频">
-          <button class="vd-primary" id="vdExportBtn" type="button">导出视频</button>
+          <!-- v1.4.0：两个常驻按钮，竖排。上面是原帖子卡视频（v1.3.0），
+               下面是新增的英文翻译卡视频。两者共用下面的进度条与状态文字。 -->
+          <div class="vd-actions">
+            <button class="vd-primary" id="vdExportBtn" type="button">导出视频</button>
+            <button class="vd-primary vd-alt" id="vdExportTrBtn" type="button">导出翻译卡视频</button>
+          </div>
           <span class="vd-spec">MP4 · 9:16 · 720×1280 · 10 秒 · 30fps</span>
           <div class="vd-progress" id="vdProgress" aria-hidden="true"><i id="vdProgressFill"></i></div>
           <span class="vd-note" id="vdNote" role="status">就绪</span>
@@ -2951,9 +2993,23 @@ X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行
   var vdBar = $('vdBar'), vdBtn = $('vdExportBtn');
   var vdNote = $('vdNote'), vdFill = $('vdProgressFill');
 
+  /* v1.4.0：第二个常驻按钮 —— 导出「英文翻译卡」视频。
+     不加新开关：需求是「两个都能随便选」，就摆两个按钮。 */
+  var vdTrBtn = $('vdExportTrBtn');
+
+  /* v1.4.0：翻译卡的 @Handle 跟随同一个打码开关。
+     纯追加一个监听，不动 applyHandleMask() 里那份旧代码
+     （旧代码只认 profileHandle / handleText 两个元素）。 */
+  function vdSyncTrMask() {
+    var el = $('trHandleText');
+    if (el) el.classList.toggle('is-masked', $('maskHandleToggle').checked);
+  }
+  $('maskHandleToggle').addEventListener('change', vdSyncTrMask);
+  vdSyncTrMask();
+
   // 给课堂留一个「观察内部状态」的窗口：不参与渲染，也不进导出 DOM
   window.__vd = {
-    version: '1.3.0',
+    version: '1.4.0',
     last: null,
     get supported() {
       return typeof window.VideoEncoder === 'function' &&
@@ -3199,6 +3255,72 @@ function vdTopBoxes(u8) {
   return out;
 }
 
+  /* ---- 12.4b 翻译卡专用：把「英文翻译卡」克隆成一份导出 SVG ----
+     和 buildExportSvg() 同构，但 clones 只有 translationCard 一张：
+       ① 经典版如果还没展开译文，只在「克隆体」里展开 —— 视频里一定有中文译文，
+          而用户看到的实时页面一动不动（改的是 copy，不是原节点）；
+       ② 自动版如果正停在「显示原文」，克隆体里也强制回到译文；
+       ③ 克隆体的 id 会短暂重复（#trTranslatedBox 等），但 querySelector
+          只在 temp 子树里找，temp 移除后真实节点不受影响。 */
+  function vdBuildTrSvg(pad, scale) {
+    var cardW = Math.round(translationCard.getBoundingClientRect().width) ||
+                Math.round(postCard.getBoundingClientRect().width) || 600;
+
+    var temp = document.createElement('div');
+    temp.style.cssText = 'position:fixed;left:-9999px;top:0;width:' + cardW + 'px;';
+
+    var copy = translationCard.cloneNode(true);
+    copy.removeAttribute('hidden');   // 「主页头部」视图下这张卡是 hidden 的
+    copy.style.marginTop = '0';       // 预览里它像「下一条帖子」，视频里不需要这段外边距
+
+    var box = copy.querySelector('#trTranslatedBox');
+    if (box) box.hidden = false;
+    var link = copy.querySelector('#trTranslateBtn');
+    if (link) link.textContent = '隐藏翻译';
+
+    if (trMode === 'auto' && trShowOriginal) {
+      var ab = copy.querySelector('#trAutoBody');
+      if (ab) ab.textContent = trTranslatedInput.value;
+      var sb = copy.querySelector('#trShowOriginalBtn');
+      if (sb) sb.textContent = '显示原文';
+    }
+
+    temp.appendChild(copy);
+    document.body.appendChild(temp);
+    var height = Math.max(1, Math.ceil(temp.getBoundingClientRect().height));
+    var markup = temp.innerHTML;
+    document.body.removeChild(temp);
+
+    // 组装导出 DOM：data-theme 挂这一层，CSS 变量照样继承
+    var holder = document.createElement('div');
+    holder.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+    holder.setAttribute('data-theme', body.dataset.theme);
+    holder.setAttribute('style',
+      'display:flex;flex-direction:column;width:' + cardW + 'px;' +
+      'font-family:' + FONT_STACK + ';color:var(--text);');
+
+    var styleEl = document.createElement('style');
+    styleEl.textContent = collectCss();    // 与 PNG 完全同一份内联样式
+    holder.appendChild(styleEl);
+    holder.insertAdjacentHTML('beforeend', markup);
+
+    var outW = cardW + pad * 2;
+    var outH = height + pad * 2;
+    var bg = getComputedStyle(body).getPropertyValue('--page-bg').trim() || '#000';
+
+    var xml = new XMLSerializer().serializeToString(holder);
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + outW * scale + '" height="' + outH * scale + '" ' +
+        'viewBox="0 0 ' + outW + ' ' + outH + '">' +
+        '<rect width="' + outW + '" height="' + outH + '" fill="' + bg + '"/>' +
+        '<foreignObject x="' + pad + '" y="' + pad + '" width="' + cardW + '" height="' + height + '">' +
+          xml +
+        '</foreignObject>' +
+      '</svg>';
+
+    return { svg: svg, w: outW, h: outH, bg: bg, card: 'tr' };
+  }
+
   /* ---- 12.5 把「导出图片」的 SVG 栅格化成位图 ----
      复用 exportCard() 一模一样的做法：SVG → Image → 2 倍 canvas。
      范围 / 边距 / Handle 打码 / 主题 / 翻译卡不进图，全部沿用旧设置。 */
@@ -3236,7 +3358,8 @@ function vdTopBoxes(u8) {
   }
 
   /* ---- 12.7 主流程：能力检测 → 编码 → 封装 → 下载 ---- */
-  async function vdMakeMp4() {
+  async function vdMakeMp4(kind) {
+    kind = kind || 'post';          // 'post' = 帖子卡视频 / 'tr' = 翻译卡视频
     if (vdBusy) return;
     if (!window.__vd.supported) {
       vdSetNote('当前浏览器不支持 WebCodecs H.264，请改用 Edge / Chrome', 'err');
@@ -3246,11 +3369,14 @@ function vdTopBoxes(u8) {
     vdBusy = true;
     vdBar.classList.add('vd-busy');
     vdProgress(0);
-    vdSetNote('正在准备画面…');
+    vdSetNote('正在准备画面…' + (kind === 'tr' ? '（翻译卡）' : ''));
     var t0 = Date.now();
 
     try {
-      var spec = buildExportSvg(exportRange, exportPad, 2);
+      // v1.4.0：两路画面只在这里分叉，后面编码 / 封装 / 下载完全共用
+      var spec = (kind === 'tr')
+        ? vdBuildTrSvg(exportPad, 2)
+        : buildExportSvg(exportRange, exportPad, 2);
       var card = await vdRasterize(spec);
 
       // 挑一个浏览器真的支持的 H.264 配置（不同版本支持的 level 不同）
@@ -3335,17 +3461,24 @@ function vdTopBoxes(u8) {
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
-      a.download = 'x-post-' + stamp() + '.mp4';
+      a.download = 'x-post' + (kind === 'tr' ? '-tr' : '') + '-' + stamp() + '.mp4';
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
 
       vdProgress(1);
-      vdSetNote('已导出 ' + (mux.bytes.length / 1048576).toFixed(2) +
+      vdSetNote((kind === 'tr' ? '翻译卡 ' : '') + '已导出 ' +
+                (mux.bytes.length / 1048576).toFixed(2) +
                 ' MB · ' + VD_SECS + ' 秒', 'ok');
       window.__vd.last = {
         ok: true, size: mux.bytes.length, codec: codec, tried: tried,
+        kind: kind, card: spec.card || 'post',
+        svgLen: spec.svg.length,
+        // 给课堂 / 自测看的证据：翻译卡视频的 SVG 里确实带了中文译文
+        svgHasTranslatedText: kind === 'tr'
+          ? spec.svg.indexOf(trTranslatedInput.value.slice(0, 6)) >= 0 : null,
+        svgHasMask: spec.svg.indexOf('is-masked') >= 0,
         sampleCount: samples.length, keyCount: mux.keyIdx.length,
         avcCLen: avcC.length, annexb: annexb,
         boxes: vdTopBoxes(mux.bytes),
@@ -3361,7 +3494,8 @@ function vdTopBoxes(u8) {
     }
   }
 
-  vdBtn.addEventListener('click', function () { flash(this); vdMakeMp4(); });
+  vdBtn.addEventListener('click', function () { flash(this); vdMakeMp4('post'); });
+  vdTrBtn.addEventListener('click', function () { flash(this); vdMakeMp4('tr'); });
 
 })();
 </script>
