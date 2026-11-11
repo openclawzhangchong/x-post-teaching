@@ -1,0 +1,2045 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>X 帖子页 · 前端教学复刻</title>
+<style>
+  /* ============================================================
+     00. 全局重置
+     ------------------------------------------------------------
+     box-sizing: border-box 让 padding / border 算进宽度，
+     后面所有百分比和 600px 卡宽都更容易推。
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { height: 100%; }
+  body {
+    margin: 0;
+    min-height: 100%;
+    /* 系统字体栈：不引 CDN，中文在 Windows / macOS 都能落到合适字体 */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+                 "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--page-bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ============================================================
+     01. 主题变量（本页最重要的教学点）
+     ------------------------------------------------------------
+     把「颜色、边框、背景」全部收进自定义属性。
+     切换主题时只改 <body data-theme>，DOM 一个节点都不动，
+     所有颜色顺着 CSS 继承自动换掉。
+
+     这里有两套颜色：
+       --sim-*   被模拟的 X 页面用到的颜色；
+       --tool-*  只想给「编辑器」（工具条 / 编辑面板 / 底部说明）用的颜色。
+     刻意分开，工具才不会越长越像 X 自己的界面。
+     ============================================================ */
+  /* 主题变量挂在 [data-theme] 上而不是写死 body：
+     导出图片时是「克隆卡片塞进 SVG」，那块 DOM 里没有 body，
+     但同样带 data-theme 属性，变量才能照样继承下来。 */
+  [data-theme="dark"] {
+    --page-bg: #0a0e13;
+    --card-bg: #000000;
+    --editor-bg: #10161d;
+    --text: #e7e9ea;
+    --muted: #71767b;
+    --border: #2f3336;
+    --line: #16181c;
+    --hover: #16181c;
+    --input-bg: #0b1016;
+    --input-border: #2f3336;
+    --blue: #1d9bf0;
+    --green: #00ba7c;
+    --pink: #f91880;
+
+    /* 预览底板：比页面底色再深一点，虚线包住，明确「这是被模拟的页面」 */
+    --sim-bg: #05080b;
+    --sim-border: #1e242a;
+    --sim-label: #4d5862;
+    /* X 深色下「关注」是白底黑字 */
+    --btn-primary-bg: #eff3f4;
+    --btn-primary-text: #0f1419;
+  }
+  [data-theme="light"] {
+    --page-bg: #eef1f4;
+    --card-bg: #ffffff;
+    --editor-bg: #ffffff;
+    --text: #0f1419;
+    --muted: #536471;
+    --border: #cfd9de;
+    --line: #eff3f4;
+    --hover: #f7f9f9;
+    --input-bg: #ffffff;
+    --input-border: #d7dde2;
+    --blue: #1d9bf0;
+    --green: #00ba7c;
+    --pink: #f91880;
+
+    --sim-bg: #e5eaef;
+    --sim-border: #c2ccd4;
+    --sim-label: #93a1ab;
+    /* X 浅色下「关注」是黑底白字 */
+    --btn-primary-bg: #0f1419;
+    --btn-primary-text: #ffffff;
+  }
+
+  /* 主题切换时给大面积上色的元素加过渡，避免生硬闪一下 */
+  body, .editor, .post, .profile, .toolbar, input, textarea, .footnotes {
+    transition: background-color .22s ease, color .22s ease, border-color .22s ease;
+  }
+
+  /* ============================================================
+     02. 页面骨架与响应式
+     ------------------------------------------------------------
+     宽屏：两列网格（左侧编辑 / 右侧预览），编辑面板 sticky。
+     窄屏：单列堆叠，卡片占满可读宽度。
+     ============================================================ */
+  .shell {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 32px 32px 64px;
+  }
+
+  /* 页头只写「这是什么工具」，操作说明统一放页面最底部，
+     避免学生把工具说明当成被模拟页面的一部分。 */
+  .page-title { margin-bottom: 24px; }
+  .page-title h1 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: .04em;
+  }
+  .page-title .kicker {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .18em;
+    color: var(--muted);
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 340px minmax(0, 1fr);
+    gap: 44px;
+    align-items: start;
+  }
+
+  @media (max-width: 880px) {
+    .shell { padding: 20px 16px 56px; }
+    .app {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+    .editor { position: static; }
+  }
+
+  /* 宽屏时编辑面板是 sticky 的：面板一旦比视口还高，
+     底部的字段会被顶出屏幕外而且永远滚不到
+     （sticky 元素不会跟着页面滚走）。所以给它限高 + 内部滚动。 */
+  @media (min-width: 881px) {
+    .editor {
+      max-height: calc(100vh - 56px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+  }
+
+  /* ============================================================
+     03. 编辑面板
+     ============================================================ */
+  .editor {
+    position: sticky;
+    top: 28px;
+    display: grid;
+    gap: 18px;
+    padding: 20px;
+    background: var(--editor-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  .editor-title {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .14em;
+    color: var(--muted);
+  }
+
+  /* 分组：用一条细线把「共用 / 主页 / 帖子」切开，
+     比十几个字段堆在一起好找得多。 */
+  .ed-group {
+    display: grid;
+    gap: 12px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+  .ed-group:first-of-type { padding-top: 0; border-top: 0; }
+  .ed-group-title {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .12em;
+  }
+
+  .field { display: grid; gap: 6px; }
+  .field > label,
+  .group-label {
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: .04em;
+  }
+  .field input[type="text"],
+  .field input[type="number"],
+  .field textarea {
+    width: 100%;
+    font: inherit;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 10px;
+    padding: 9px 11px;
+    outline: none;
+  }
+  .field input:focus,
+  .field textarea:focus { border-color: var(--blue); }
+
+  .field textarea {
+    resize: vertical;
+    line-height: 1.65;
+    overflow-y: auto;
+  }
+  /* 简介短，3 行就够 */
+  .field textarea.small { min-height: 84px; }
+  /* 正文要写长文：至少 7 行高（14px × 1.65 ≈ 23px/行），
+     再短就会被裁成一小条、看起来像只读预览。 */
+  #bodyInput { min-height: 176px; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 360px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .file-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  /* 头像来源三选一：占满一行、三段等宽 */
+  .avatar-mode { width: 100%; }
+  .avatar-mode button { flex: 1 1 0; }
+  .file-btn,
+  .ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: inherit;
+    font-size: 12px;
+    padding: 7px 12px;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--input-border);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .file-btn:hover,
+  .ghost:hover { border-color: var(--blue); color: var(--blue); }
+  .ghost { color: var(--muted); }
+  .hint {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .check-row input { accent-color: var(--blue); }
+
+  /* ---------- 工具条主按钮 ----------
+     「随机」是整页唯一的随机入口：方角、实心、用文字色（不是 X 的品牌蓝），
+     一眼能看出它属于编辑器，不属于被模拟的帖子页面。 */
+  .toolbar-primary {
+    flex: 0 0 auto;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    color: var(--page-bg);
+    background: var(--text);
+    border: 1px solid var(--text);
+    border-radius: 6px;
+    padding: 8px 20px;
+    cursor: pointer;
+  }
+  .toolbar-primary:hover { opacity: .85; }
+  .toolbar-primary:active { transform: translateY(1px); }
+
+  /* 点击反馈：按钮闪一下，不弹窗、不震动 */
+  .flash { animation: press-flash .4s ease; }
+  @keyframes press-flash {
+    0%   { opacity: .3; }
+    100% { opacity: 1; }
+  }
+
+  /* 时间只读：值由 Date.now() 和「随机 / 恢复示例」决定，
+     不让人直接改文字，避免相对时间和手写日期打架。 */
+  #timeInput { color: var(--muted); cursor: default; }
+
+  /* ============================================================
+     04. 控制工具条（属于编辑器，不属于被模拟的页面）
+     ------------------------------------------------------------
+     三条视觉线索把它和帖子卡彻底分开：
+       1) 方角（6px）+ 细边框的按钮组，不是 X 那种圆角胶囊；
+       2) 控件一律中性灰，激活态也不用 X 的品牌蓝；
+       3) 下面留 26px 空白，再接预览底板。
+     ============================================================ */
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 22px;
+    padding: 12px 14px;
+    background: var(--editor-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .toolbar-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .toolbar-label {
+    font-size: 11px;
+    letter-spacing: .1em;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  /* 分段按钮组：靠边框和底色区分，不靠蓝色主色 */
+  .btn-group {
+    display: inline-flex;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .btn-group button {
+    font: inherit;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    border-left: 1px solid var(--input-border);
+    padding: 7px 12px;
+    cursor: pointer;
+  }
+  .btn-group button:first-child { border-left: 0; }
+  .btn-group button:hover { color: var(--text); background: var(--hover); }
+  .btn-group button.on {
+    color: var(--text);
+    background: var(--hover);
+    font-weight: 600;
+  }
+
+  .toolbar-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+    margin-left: auto;
+  }
+  .toolbar-check input { accent-color: var(--muted); }
+
+  /* 导出工具条：单独一排，和上面的演示控制拉开 */
+  .toolbar-export { margin-top: 10px; }
+  .toolbar-note {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ============================================================
+     05. 预览底板
+     ------------------------------------------------------------
+     极深的底色 + 虚线边框 + 一行小字标签，
+     把「被模拟的页面」包成一块独立区域，
+     和外面的工具条 / 编辑面板分属两层。
+     ============================================================ */
+  .preview {
+    margin-top: 26px;
+    padding: 16px;
+    background: var(--sim-bg);
+    border: 1px dashed var(--sim-border);
+    border-radius: 18px;
+  }
+  .preview-label {
+    display: block;
+    margin: 2px 0 12px;
+    font-size: 10px;
+    letter-spacing: .14em;
+    color: var(--sim-label);
+  }
+
+  .stage { display: flex; flex-direction: column; }
+  .stage-inner { width: 100%; max-width: 600px; margin: 0 auto; }
+
+  /* ============================================================
+     06. 个人主页头部
+     ------------------------------------------------------------
+     这里演示「同一份用户数据，在另一个页面里怎么排」：
+     昵称、handle、认证标和帖子卡共用，简介 / 关注数 / 粉丝数只在主页出现。
+     ============================================================ */
+  .profile {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+
+  .profile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .back-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    color: var(--text);
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  .back-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+  }
+  .back-btn:hover { background: var(--hover); }
+  .topbar-name {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+  }
+  .topbar-name b {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 21px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .topbar-name span {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--muted);
+  }
+
+  /* 头像 + 关注按钮同排；align-items:flex-start 让按钮贴顶 */
+  .profile-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 16px 0;
+  }
+  .profile-avatar {
+    flex: 0 0 72px;
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--line);
+    color: var(--text);
+    font-size: 28px;
+    font-weight: 700;
+    user-select: none;
+  }
+  .profile-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* X 自己的「关注」按钮就是胶囊 + 反色底：它属于被模拟的页面，
+     所以这里保留原样，和工具条里的方角按钮正好形成对比。 */
+  .follow-btn {
+    flex: 0 0 auto;
+    margin-top: 4px;
+    padding: 7px 16px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--btn-primary-text);
+    background: var(--btn-primary-bg);
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+
+  .profile-id { padding: 12px 16px 0; }
+  .profile-id .display-name { font-size: 19px; line-height: 25px; }
+  .profile-id .handle { font-size: 14px; }
+  .profile-id .meta-line { margin-top: 2px; }
+
+  .profile-bio {
+    padding: 10px 16px 0;
+    font-size: 15px;
+    line-height: 20px;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+  }
+
+  .profile-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    padding: 12px 16px 16px;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--muted);
+  }
+  .profile-stats b {
+    color: var(--text);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ============================================================
+     07. 帖子卡本体
+     ------------------------------------------------------------
+     卡片只负责底色、圆角和外描边；内部区块全部靠 flex 排列。
+     ============================================================ */
+  .post {
+    width: 100%;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+  }
+
+  .post-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  /* ---------- 7.1 头像 ----------
+     border-radius:50% + 固定宽高 = 圆。
+     图片用 object-fit:cover，任意比例都填满圆形且不变形。
+     没有图片时，同一容器显示昵称首字作为占位。 */
+  .avatar {
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--line);
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 700;
+    user-select: none;
+  }
+  .avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* ---------- 7.2 头部：昵称 / 徽章 / handle ----------
+     flex:1 + min-width:0 是关键：
+     没有 min-width:0，弹性子项默认最小宽度是内容宽度，
+     text-overflow:ellipsis 永远不会生效。
+     昵称、handle 各自 nowrap + hidden + ellipsis，
+     长名字只在自己的格子里省略，不会把时间挤走。 */
+  .head-main {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+    padding-top: 1px;
+  }
+  .name-line {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+  .display-name {
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .badge { display: inline-flex; flex: 0 0 auto; }
+  .badge svg { width: 18px; height: 18px; display: block; }
+  .meta-line {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
+    font-size: 14px;
+    line-height: 18px;
+    color: var(--muted);
+  }
+  .handle {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ---------- 7.2b 导出打码：把 @Handle 变成马赛克条 ----------
+     需求：导出的 PNG 可以选择性遮住 Handle，默认不打码。
+
+     为什么状态挂在 .handle 自己身上，而不是 body[data-mask]？
+       导出时是 cloneNode(true) 把卡片克隆进 SVG foreignObject，
+       那块 DOM 里没有 body，凡是依赖祖先状态的选择器都会失效 ——
+       结果就是屏幕上打码了、导出的 PNG 里却漏出真实 Handle。
+       class 会随 cloneNode 一起带走，collectCss() 也会把这条规则
+       内联进导出文档，两边必然一致。这是本功能最容易踩的坑。
+
+     为什么不用 filter: blur()？
+       foreignObject 对 CSS filter 支持不稳（Safari 尤其容易整块空白），
+       用「透明文字 + 渐变背景」这类普通 CSS 最保险。
+
+     为什么只改颜色不改 width / font-size / display？
+       打码前后排版必须完全一致，否则学生会误以为打码改变了布局。
+     ------------------------------------------------------------ */
+  .handle.is-masked {
+    color: transparent !important;
+    background: repeating-linear-gradient(90deg,
+        var(--muted) 0 7px, var(--border) 7px 14px);
+    border-radius: 3px;
+    box-shadow: 0 0 0 1px var(--muted);
+  }
+  .meta-dot { flex: 0 0 auto; }
+  .post-time { flex: 0 0 auto; white-space: nowrap; }
+
+  /* ============================================================
+     07.3 正文
+     ------------------------------------------------------------
+     white-space: pre-wrap：
+       - 保留换行（像 <pre>）；
+       - 但超长行会正常折行（<pre> 不会）。
+     配合 overflow-wrap:break-word，长 URL / 中英混排也不会撑破卡片。
+     ============================================================ */
+  .post-body {
+    margin: 10px 0 0 52px;   /* 52px = 头像 40 + 间距 12，和昵称对齐 */
+    font-size: 15px;
+    line-height: 20px;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+  }
+
+  /* ============================================================
+     08. 配图位
+     ------------------------------------------------------------
+     没有图片时整个容器 hidden，卡片自然收起，不留空白占位。
+     有图时固定 16:9 + object-fit:cover，任何原图都不撑破布局。
+     ============================================================ */
+  .post-media {
+    margin: 12px 0 0 52px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+  }
+  .post-media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  [hidden] { display: none !important; }
+
+  /* ============================================================
+     09. 互动行
+     ------------------------------------------------------------
+     六个按钮等距排开；数字用 tabular-nums，
+     数字变化时宽度不变，整行不会左右抖动。
+     图标全部是内联 SVG：可随 currentColor 变色、可缩放、无需额外请求。
+     ============================================================ */
+  .post-actions {
+    display: flex;
+    justify-content: space-between;
+    max-width: 460px;
+    margin: 12px 0 0 52px;
+    color: var(--muted);
+  }
+  .action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 2px;
+    font: inherit;
+    font-size: 13px;
+    line-height: 18px;
+    color: inherit;
+    background: none;
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .action svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+  }
+  .action:hover { color: var(--blue); }
+  .action-repost:hover { color: var(--green); }
+  .action-like:hover { color: var(--pink); }
+  .action-bookmark:hover { color: var(--blue); }
+  .count { font-variant-numeric: tabular-nums; }
+
+  /* ============================================================
+     10. 结构标注（讲课时用）
+     ------------------------------------------------------------
+     打开 body.annotate 后：
+       1) 每个 [data-region] 加虚线描边；
+       2) ::after 用 attr(data-region) 自动读取中文标签，
+          不需要在 JS 里为每个区块手写一段文字。
+     每种区域只用一个 --region-color 变量区分颜色。
+     ============================================================ */
+  .region { position: relative; }
+  .r-topbar  { --region-color: #9aa7b4; }
+  .r-avatar  { --region-color: #ffb703; }
+  .r-head    { --region-color: #1d9bf0; }
+  .r-body    { --region-color: #00ba7c; }
+  .r-media   { --region-color: #c471ed; }
+  .r-actions { --region-color: #ff7a59; }
+
+  body.annotate .region {
+    outline: 1.5px dashed var(--region-color);
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+  body.annotate .region::after {
+    content: attr(data-region);
+    position: absolute;
+    top: -13px;
+    left: 0;
+    z-index: 3;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: .04em;
+    white-space: nowrap;
+    color: #08131f;
+    background: var(--region-color);
+    padding: 3px 6px;
+    border-radius: 3px;
+    pointer-events: none;
+  }
+  /* 头部区在头像右侧，标签放右上角，避免和「头像区」重叠 */
+  body.annotate .r-head::after { left: auto; right: 0; }
+
+  /* 标签默认挂在区域上方 13px 处。主页和帖子的文字区块排得很密，
+     开标注时给这几块补一点上边距，否则标签会盖住上一行文字。
+     只在标注模式下生效，不影响平时看到的排版。 */
+  body.annotate .profile-bio,
+  body.annotate .post-body { margin-top: 26px; }
+  body.annotate .profile-stats { margin-top: 16px; }
+  body.annotate .post-actions { margin-top: 28px; }
+
+  /* ============================================================
+     11. 底部说明
+     ------------------------------------------------------------
+     所有操作说明 / 教学提示集中放到页面最底部，
+     和固定声明排在一起、同款小灰字。
+     放到顶部学生会误以为那是被模拟页面的一部分。
+     ============================================================ */
+  .footnotes {
+    max-width: 720px;
+    margin: 40px auto 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    line-height: 1.8;
+    letter-spacing: .02em;
+    text-align: center;
+    color: var(--muted);
+  }
+  .footnotes p { margin: 0 0 3px; }
+  .footnotes code {
+    font-size: 11px;
+    background: var(--line);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .disclaimer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9;
+    padding: 7px 12px;
+    font-size: 11px;
+    letter-spacing: .06em;
+    text-align: center;
+    color: var(--muted);
+    background: var(--page-bg);
+    border-top: 1px solid var(--border);
+  }
+  .shell { padding-bottom: 76px; }  /* 给固定页脚留出安全距离 */
+
+  @media (max-width: 420px) {
+    .post { padding: 14px; }
+    /* 正文缩进保持 52px（头像 40 + 间距 12），换行后仍与昵称对齐 */
+    .preview { padding: 10px; }
+    .profile { border-radius: 14px; }
+  }
+</style>
+</head>
+<body data-theme="dark">
+<main class="shell">
+  <header class="page-title">
+    <span class="kicker">TEACHING PAGE</span>
+    <h1>X 帖子页 · 前端教学复刻</h1>
+  </header>
+
+  <div class="app">
+    <!-- ==========================================================
+         编辑面板：所有输入只改右侧预览里的文案 / 数字 / 图片，
+         不改 DOM 结构，方便课堂上对照「数据 → 视图」。
+         昵称 / handle / 认证三份数据同时喂给「主页头部」和「帖子卡」，
+         这是这一版新增的教学点：一份数据，两个页面。
+         ========================================================== -->
+    <aside class="editor" aria-label="编辑面板">
+      <h2 class="editor-title">编辑面板</h2>
+
+      <section class="ed-group">
+        <h3 class="ed-group-title">共用信息</h3>
+
+        <div class="field">
+          <span class="group-label">头像来源</span>
+          <!-- 三选一：字母占位 / 本地上传 / 在线生成 -->
+          <div class="btn-group avatar-mode" id="avatarModeGroup" role="group" aria-label="头像来源">
+            <button type="button" data-avatar-mode="letter" class="on">字母占位</button>
+            <button type="button" data-avatar-mode="upload">本地上传</button>
+            <button type="button" data-avatar-mode="online">在线生成</button>
+          </div>
+
+          <div class="file-line" id="avatarUploadRow" hidden>
+            <!-- 隐藏原生 file 控件，用 label 包一个按钮样式，保证各浏览器外观一致 -->
+            <label class="file-btn">
+              选择图片
+              <input id="avatarFile" type="file" accept="image/*" hidden />
+            </label>
+            <button class="ghost" id="avatarClear" type="button">清除</button>
+          </div>
+
+          <div class="file-line" id="avatarOnlineRow" hidden>
+            <button class="ghost" id="avatarRoll" type="button">换一个</button>
+            <span class="hint" id="avatarHint"></span>
+          </div>
+
+          <p class="hint" id="avatarDesc">未上传时用昵称首字占位；一张图同时用于主页和帖子卡。</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="field">
+            <label for="nameInput">昵称</label>
+            <input id="nameInput" type="text" value="林知远" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label for="handleInput">Handle</label>
+            <input id="handleInput" type="text" value="lin_zhiyuan" spellcheck="false" />
+          </div>
+        </div>
+
+        <label class="check-row">
+          <input id="verifiedToggle" type="checkbox" checked />
+          显示认证徽章
+        </label>
+      </section>
+
+      <section class="ed-group">
+        <h3 class="ed-group-title">主页头部</h3>
+
+        <div class="field">
+          <label for="bioInput">简介</label>
+          <textarea id="bioInput" class="small" rows="3" spellcheck="false">前端老师。拆页面，也拆问题。
+平时写教学用的 HTML/CSS 小例子。</textarea>
+          <p class="hint">回车换行同样保留。</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="field">
+            <label for="followingCount">关注数</label>
+            <input id="followingCount" type="number" min="0" step="1" value="128" />
+          </div>
+          <div class="field">
+            <label for="followersCount">粉丝数</label>
+            <input id="followersCount" type="number" min="0" step="1" value="12000" />
+          </div>
+        </div>
+        <p class="hint">填原始数字；超过 1 万会自动写成「1.2万」，跟 X 的显示规则一致。</p>
+      </section>
+
+      <section class="ed-group">
+        <h3 class="ed-group-title">帖子</h3>
+
+        <div class="field">
+          <label for="timeInput">发布时间</label>
+          <!-- 只读：值由 Date.now() 与「随机 / 恢复示例」决定，卡片按相对时间显示 -->
+          <input id="timeInput" type="text" readonly aria-describedby="timeHint" />
+          <p class="hint" id="timeHint"></p>
+        </div>
+
+        <div class="field">
+          <label for="bodyInput">正文（支持换行）</label>
+          <textarea id="bodyInput" rows="7" spellcheck="false">大多数人不会去搜索。
+
+X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行。
+同一个 DOM，换一套 CSS 变量，就是另一套主题。</textarea>
+          <p class="hint">点进来直接打字即可，回车换行会原样保留在右侧卡片上。</p>
+        </div>
+
+        <div class="field">
+          <span class="group-label">互动数字</span>
+          <div class="grid-2">
+            <div class="field">
+              <label for="replyCount">回复</label>
+              <input id="replyCount" type="number" min="0" step="1" value="12" />
+            </div>
+            <div class="field">
+              <label for="repostCount">转推</label>
+              <input id="repostCount" type="number" min="0" step="1" value="86" />
+            </div>
+            <div class="field">
+              <label for="likeCount">点赞</label>
+              <input id="likeCount" type="number" min="0" step="1" value="1204" />
+            </div>
+            <div class="field">
+              <label for="viewCount">查看</label>
+              <input id="viewCount" type="number" min="0" step="1" value="8650" />
+            </div>
+            <div class="field">
+              <label for="bookmarkCount">书签</label>
+              <input id="bookmarkCount" type="number" min="0" step="1" value="34" />
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="group-label">帖子配图（可留空）</span>
+          <div class="file-line">
+            <label class="file-btn">
+              上传配图
+              <input id="mediaFile" type="file" accept="image/*" hidden />
+            </label>
+            <button class="ghost" id="mediaClear" type="button">移除</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ==========================================================
+         演示区：工具条（编辑器） + 预览底板（被模拟的页面）
+         ========================================================== -->
+    <section class="stage">
+      <div class="stage-inner">
+
+        <!-- 工具条一：演示控制。
+             「随机」是这一排的主按钮：一次换掉整页数据。
+             方角按钮组 + 中性灰，刻意不用 X 的胶囊和品牌蓝。 -->
+        <div class="toolbar" role="group" aria-label="预览控制">
+          <button class="toolbar-primary" id="rollBtn" type="button">随机</button>
+          <button class="ghost" id="resetBtn" type="button">恢复示例</button>
+
+          <div class="toolbar-group">
+            <span class="toolbar-label">显示</span>
+            <div class="btn-group" role="group" aria-label="切换预览内容">
+              <button type="button" data-view-btn="all" class="on">全部</button>
+              <button type="button" data-view-btn="profile">主页头部</button>
+              <button type="button" data-view-btn="post">帖子卡</button>
+            </div>
+          </div>
+
+          <div class="toolbar-group">
+            <span class="toolbar-label">主题</span>
+            <div class="btn-group" role="group" aria-label="主题切换">
+              <button type="button" data-theme-btn="dark" class="on">深色</button>
+              <button type="button" data-theme-btn="light">浅色</button>
+            </div>
+          </div>
+
+          <label class="toolbar-check">
+            <input id="annotateToggle" type="checkbox" />
+            结构标注
+          </label>
+        </div>
+
+        <!-- 工具条二：导出图片。单独一排，
+             和上面的演示控制区分开，避免一行塞太多控件。 -->
+        <div class="toolbar toolbar-export" role="group" aria-label="导出设置">
+          <button class="toolbar-primary" id="exportBtn" type="button">导出图片</button>
+
+          <div class="toolbar-group">
+            <span class="toolbar-label">范围</span>
+            <div class="btn-group" role="group" aria-label="导出范围">
+              <button type="button" data-export-range="post" class="on">帖子卡</button>
+              <button type="button" data-export-range="both">主页+帖子</button>
+            </div>
+          </div>
+
+          <div class="toolbar-group">
+            <span class="toolbar-label">边距</span>
+            <div class="btn-group" role="group" aria-label="导出边距">
+              <button type="button" data-pad="32">32</button>
+              <button type="button" data-pad="48" class="on">48</button>
+              <button type="button" data-pad="64">64</button>
+            </div>
+          </div>
+
+          <!-- 导出打码开关：默认不勾选（无 checked），勾选后预览与 PNG 同步生效 -->
+          <label class="toolbar-check" title="勾选后，预览和导出的 PNG 都会把 @Handle 遮成马赛克；默认关闭">
+            <input id="maskHandleToggle" type="checkbox" />
+            Handle 打码
+          </label>
+
+          <span class="toolbar-note" id="exportNote">PNG · 2 倍</span>
+        </div>
+
+        <!-- 预览底板：虚线包住，明确「下面这一块是被模拟的页面」 -->
+        <div class="preview">
+          <span class="preview-label">预览区 · 以下为被模拟的页面</span>
+
+          <!-- ================= 个人主页头部 ================= -->
+          <section class="profile" id="profileCard" aria-label="个人主页头部">
+            <div class="profile-topbar region r-topbar" data-region="返回栏">
+              <button class="back-btn" type="button" aria-label="返回">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 12H4M4 12l6-6M4 12l6 6"/>
+                </svg>
+              </button>
+              <div class="topbar-name">
+                <b id="profileTopName">林知远</b>
+                <span>主页</span>
+              </div>
+            </div>
+
+            <div class="profile-head">
+              <div class="profile-avatar region r-avatar" data-region="大头像">
+                <img id="profileAvatarImg" alt="" hidden />
+                <span id="profileAvatarLetter">林</span>
+              </div>
+              <button class="follow-btn" type="button">关注</button>
+            </div>
+
+            <div class="profile-id region r-head" data-region="昵称/认证">
+              <div class="name-line">
+                <span class="display-name" id="profileName">林知远</span>
+                <span class="badge" id="profileBadge" aria-label="已认证">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="#1d9bf0" d="M22.25 12c0-1.43-.88-2.67-2.19-3.34.46-1.39.2-2.9-.81-3.91s-2.52-1.27-3.91-.81c-.66-1.31-1.91-2.19-3.34-2.19s-2.67.88-3.33 2.19c-1.4-.46-2.91-.2-3.92.81s-1.26 2.52-.8 3.91c-1.31.67-2.2 1.91-2.2 3.34s.89 2.67 2.2 3.34c-.46 1.39-.21 2.9.8 3.91s2.52 1.26 3.91.81c.67 1.31 1.91 2.19 3.34 2.19s2.67-.88 3.34-2.19c1.39.45 2.9.2 3.91-.81s1.27-2.52.81-3.91c1.31-.67 2.19-1.91 2.19-3.34z"/>
+                    <path fill="#fff" d="M9.95 16.35l-3.6-3.6 1.4-1.4 2.2 2.2 5.3-5.3 1.4 1.4z"/>
+                  </svg>
+                </span>
+              </div>
+              <div class="meta-line">
+                <span class="handle" id="profileHandle">@lin_zhiyuan</span>
+              </div>
+            </div>
+
+            <div class="profile-bio region r-body" data-region="简介" id="profileBio">前端老师。拆页面，也拆问题。
+平时写教学用的 HTML/CSS 小例子。</div>
+
+            <div class="profile-stats region r-actions" data-region="关注/粉丝">
+              <span><b id="countFollowing">128</b> 关注</span>
+              <span><b id="countFollowers">1.2万</b> 粉丝</span>
+            </div>
+          </section>
+
+          <!-- ================= 帖子卡 ================= -->
+          <article class="post" id="postCard" aria-labelledby="displayName">
+            <!-- 头部区：头像 + 昵称/handle -->
+            <header class="post-head">
+              <!-- 头像：图片层与字母层叠在同一容器，JS 只切 hidden -->
+              <div class="avatar region r-avatar" data-region="头像区">
+                <img id="avatarImg" alt="" hidden />
+                <span id="avatarLetter">林</span>
+              </div>
+
+              <div class="head-main region r-head" data-region="头部区">
+                <div class="name-line">
+                  <span class="display-name" id="displayName">林知远</span>
+                  <!-- 认证徽章：内联 SVG，随尺寸缩放且无需图标字体/网络请求 -->
+                  <span class="badge" id="verifiedBadge" aria-label="已认证">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path fill="#1d9bf0" d="M22.25 12c0-1.43-.88-2.67-2.19-3.34.46-1.39.2-2.9-.81-3.91s-2.52-1.27-3.91-.81c-.66-1.31-1.91-2.19-3.34-2.19s-2.67.88-3.33 2.19c-1.4-.46-2.91-.2-3.92.81s-1.26 2.52-.8 3.91c-1.31.67-2.2 1.91-2.2 3.34s.89 2.67 2.2 3.34c-.46 1.39-.21 2.9.8 3.91s2.52 1.26 3.91.81c.67 1.31 1.91 2.19 3.34 2.19s2.67-.88 3.34-2.19c1.39.45 2.9.2 3.91-.81s1.27-2.52.81-3.91c1.31-.67 2.19-1.91 2.19-3.34z"/>
+                      <path fill="#fff" d="M9.95 16.35l-3.6-3.6 1.4-1.4 2.2 2.2 5.3-5.3 1.4 1.4z"/>
+                    </svg>
+                  </span>
+                </div>
+                <div class="meta-line">
+                  <span class="handle" id="handleText">@lin_zhiyuan</span>
+                  <span class="meta-dot">·</span>
+                  <time class="post-time" id="timeText">下午 2:14 · 2026年11月7日</time>
+                </div>
+              </div>
+            </header>
+
+            <!-- 正文：白色间距靠 pre-wrap，JS 用 textContent 写入，避免被当成 HTML 执行 -->
+            <div class="post-body region r-body" id="postBody" data-region="正文区">大多数人不会去搜索。
+
+X 的帖子页看上去复杂，拆开只有三段：头部、正文、互动行。
+同一个 DOM，换一套 CSS 变量，就是另一套主题。</div>
+
+            <!-- 配图：默认 hidden；有图时为 16:9 裁切 -->
+            <div class="post-media region r-media" id="mediaWrap" data-region="配图区" hidden>
+              <img id="mediaImg" alt="" />
+            </div>
+
+            <!-- 互动行：四个带数字，图标统一 18px 内联 SVG -->
+            <footer class="post-actions region r-actions" data-region="互动区">
+              <button class="action action-reply" type="button" aria-label="回复">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 12.5c0-4.1 3.3-7.2 8-7.2s8 3.1 8 7.2-3.3 7.2-8 7.2c-.9 0-1.8-.1-2.6-.4L6 20.2l.9-3.3C5 15.7 4 14.2 4 12.5z"/>
+                </svg>
+                <span class="count" id="countReply">12</span>
+              </button>
+
+              <button class="action action-repost" type="button" aria-label="转推">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 8h11l-2.5-2.5M18 16H7l2.5 2.5"/>
+                </svg>
+                <span class="count" id="countRepost">86</span>
+              </button>
+
+              <button class="action action-like" type="button" aria-label="点赞">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 20s-7-4.4-7-9.2c0-2.2 1.7-3.9 3.9-3.9 1.3 0 2.5.7 3.1 1.7.6-1 1.8-1.7 3.1-1.7 2.2 0 3.9 1.7 3.9 3.9C19 15.6 12 20 12 20z"/>
+                </svg>
+                <span class="count" id="countLike">1204</span>
+              </button>
+
+              <button class="action action-views" type="button" aria-label="查看">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 20v-5M10 20V10M15 20v-6M20 20V5"/>
+                </svg>
+                <span class="count" id="countView">8650</span>
+              </button>
+
+              <button class="action action-bookmark" type="button" aria-label="收藏">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 4h12v17l-6-4-6 4z"/>
+                </svg>
+                <span class="count" id="countBookmark">34</span>
+              </button>
+
+              <button class="action action-share" type="button" aria-label="分享">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 15V3M12 3l-4 4M12 3l4 4M5 12v8h14v-8"/>
+                </svg>
+              </button>
+            </footer>
+          </article>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 操作说明 / 教学提示：统一放页面最底部，跟固定声明连成一片小灰字 -->
+  <footer class="footnotes">
+    <p>左侧编辑面板改数据，右侧预览实时变化；上方两条工具条（随机 / 主题 / 结构标注 / 导出）属于编辑器，不是被模拟的页面。</p>
+    <p>「随机」一次换掉整页数据，等于换一个人、换一条帖子；「导出图片」把预览卡片导出成 2 倍 PNG。</p>
+    <p>勾选「Handle 打码」后，预览与导出的 PNG 都会把 @Handle 遮成马赛克；默认关闭，且不改动原文数据。</p>
+    <p>帖子卡上不显示粉丝数，粉丝数在个人主页。</p>
+    <p>打开「显示结构标注」，再右键检查 <code>border-radius</code>、<code>min-width: 0</code>、<code>white-space: pre-wrap</code> 这几条规则。</p>
+  </footer>
+</main>
+
+<!-- 固定声明：不可关闭，也不提供关闭按钮 -->
+<div class="disclaimer">教学演示 · 非平台官方页面</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ==========================================================
+     01. 元素引用
+     ========================================================== */
+  var body = document.body;
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 共用数据
+  var nameInput = $('nameInput');
+  var handleInput = $('handleInput');
+  var verifiedToggle = $('verifiedToggle');
+  var avatarImg = $('avatarImg');
+  var avatarLetter = $('avatarLetter');
+  var avatarFile = $('avatarFile');
+  var avatarClear = $('avatarClear');
+  var avatarModeGroup = $('avatarModeGroup');
+  var avatarUploadRow = $('avatarUploadRow');
+  var avatarOnlineRow = $('avatarOnlineRow');
+  var avatarRoll = $('avatarRoll');
+  var avatarHint = $('avatarHint');
+  var avatarDesc = $('avatarDesc');
+
+  // 主页头部
+  var bioInput = $('bioInput');
+  var followingCount = $('followingCount');
+  var followersCount = $('followersCount');
+  var profileTopName = $('profileTopName');
+  var profileName = $('profileName');
+  var profileHandle = $('profileHandle');
+  var profileBio = $('profileBio');
+  var profileBadge = $('profileBadge');
+  var profileCard = $('profileCard');
+  var profileAvatarImg = $('profileAvatarImg');
+  var profileAvatarLetter = $('profileAvatarLetter');
+
+  // 帖子
+  var timeInput = $('timeInput');
+  var bodyInput = $('bodyInput');
+  var replyInput = $('replyCount');
+  var repostInput = $('repostCount');
+  var likeInput = $('likeCount');
+  var viewInput = $('viewCount');
+  var bookmarkInput = $('bookmarkCount');
+  var timeHint = $('timeHint');
+  var displayName = $('displayName');
+  var handleText = $('handleText');
+  var timeText = $('timeText');
+  var postBody = $('postBody');
+  var verifiedBadge = $('verifiedBadge');
+  var postCard = $('postCard');
+
+  // 配图
+  var mediaWrap = $('mediaWrap');
+  var mediaImg = $('mediaImg');
+  var mediaFile = $('mediaFile');
+  var mediaClear = $('mediaClear');
+
+  /* ==========================================================
+     02. 数字格式化（对应教案里的 formatCount 练习）
+     ----------------------------------------------------------
+     X 上 12000 会写成「1.2万」，1200 保持原样。
+     这里只处理万 / 亿两档，够课堂用。
+     ========================================================== */
+  function formatCount(raw) {
+    var n = Number(raw);
+    if (!raw || !isFinite(n) || n <= 0) return '0';
+    if (n >= 100000000) return trimZero(n / 100000000) + '亿';
+    if (n >= 10000) return trimZero(n / 10000) + '万';
+    return String(Math.floor(n));
+  }
+  function trimZero(v) {
+    return v.toFixed(1).replace(/\.0$/, '');
+  }
+
+  /* ==========================================================
+     02.1 时间：真实时间戳 → 相对时间
+     ----------------------------------------------------------
+     卡片里不存"字符串"，只存一个毫秒时间戳 postTime。
+     每次渲染现算一次相对时间，所以页面开着也会从「刚刚」变成「1分钟前」。
+     规则：<1 分钟 → 刚刚；<60 分钟 → N分钟前；<24 小时 → N小时前；
+     再久就显示日期（跨年才带年份）。
+     ========================================================== */
+  var postTime = Date.now();
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function formatTime(ts) {
+    var minutes = Math.floor((Date.now() - ts) / 60000);
+    if (minutes < 1) return '刚刚';
+    if (minutes < 60) return minutes + '分钟前';
+    var hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + '小时前';
+    var d = new Date(ts);
+    var md = (d.getMonth() + 1) + '月' + d.getDate() + '日';
+    return d.getFullYear() === new Date().getFullYear()
+      ? md
+      : d.getFullYear() + '年' + md;
+  }
+
+  function absoluteTime(ts) {
+    var d = new Date(ts);
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+           ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+
+  /* ==========================================================
+     02.2 随机数据（全部本地生成，不联网）
+     ----------------------------------------------------------
+     名字池全是虚构人物，不对应任何真实公众人物 / 网红 / 公司高管。
+     ========================================================== */
+  function rnd(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+  function pick(list) { return list[rnd(0, list.length - 1)]; }
+  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+  // slug 是手工写的拼音/英文，保证 handle 长得像真的
+  var PEOPLE = [
+    { name: '周行野', slug: 'zhou_xingye' },
+    { name: '沈迟', slug: 'shen_chi' },
+    { name: '陆青禾', slug: 'lu_qinghe' },
+    { name: '江晚舟', slug: 'jiang_wanzhou' },
+    { name: '顾南枝', slug: 'gu_nanzhi' },
+    { name: '温叙白', slug: 'wen_xubai' },
+    { name: '岑溪', slug: 'cen_xi' },
+    { name: '许拾一', slug: 'xu_shiyi' },
+    { name: '何知夏', slug: 'he_zhixia' },
+    { name: '易南风', slug: 'yi_nanfeng' },
+    { name: '傅清野', slug: 'fu_qingye' },
+    { name: '梁雪见', slug: 'liang_xuejian' },
+    { name: '邵亦安', slug: 'shao_yian' },
+    { name: '罗见山', slug: 'luo_jianshan' },
+    { name: '韩听澜', slug: 'han_tinglan' },
+    { name: 'Mira Halloway', slug: 'mira_halloway' },
+    { name: 'Theo Vance', slug: 'theo_vance' },
+    { name: 'Nadia Brook', slug: 'nadia_brook' },
+    { name: 'Ellis Ward', slug: 'ellis_ward' },
+    { name: 'Rowan Pike', slug: 'rowan_pike' },
+    { name: 'Juno Calder', slug: 'juno_calder' },
+    { name: 'Silas Reed', slug: 'silas_reed' },
+    { name: 'Tessa Marsh', slug: 'tessa_marsh' },
+    { name: 'Owen Frost', slug: 'owen_frost' },
+    { name: 'Lena Ashcroft', slug: 'lena_ashcroft' },
+    { name: 'Caleb Nott', slug: 'caleb_nott' },
+    { name: 'Iris Vane', slug: 'iris_vane' }
+  ];
+
+  var BIOS = [
+    '前端老师。拆页面，也拆问题。\n平时写教学用的 HTML/CSS 小例子。',
+    '写代码，也写教书笔记。\n最近在拆社交产品的页面结构。',
+    '白天上班，晚上折腾 CSS。\n喜欢把复杂的东西讲简单。',
+    'Designer & 前端。\n偶尔发点排版和字体的碎碎念。',
+    '纪录片爱好者。\n研究的课题是：人为什么爱刷时间线。',
+    '在做一个没几个人知道的小工具。\n进度 60%，焦虑 100%。'
+  ];
+
+  // 粉丝数四档：几百 / 几千 / 几万 / 几十万，避免每次都是同一量级
+  var FOLLOWER_TIERS = [[280, 999], [1000, 9999], [10000, 99999], [100000, 599999]];
+
+  function randomFollowers() {
+    var tier = pick(FOLLOWER_TIERS);
+    return rnd(tier[0], tier[1]);
+  }
+
+  /* 互动数字：先生成点赞，再按比例推其余几个。
+     比例区间就是校验条件，所以生成出来的值天然满足偏序。 */
+  function makeEngagement() {
+    var likes = rnd(240, 3200);
+    return {
+      likes: likes,
+      // 转推 ≈ 点赞的 1/8 ~ 1/2
+      reposts: rnd(Math.max(1, Math.ceil(likes / 8)), Math.max(1, Math.floor(likes / 2))),
+      // 回复 ≈ 点赞的 1/30 ~ 1/5，明显小于点赞
+      replies: rnd(Math.max(1, Math.ceil(likes / 30)), Math.max(1, Math.floor(likes / 5))),
+      // 书签 < 点赞
+      bookmarks: rnd(1, Math.max(1, Math.floor(likes * 0.25))),
+      // 查看 ≥ 点赞
+      views: rnd(likes, Math.max(likes + 1, Math.round(likes * 7)))
+    };
+  }
+
+  // 生成后自检：查看 ≥ 点赞 ≥ 转推，回复明显小于点赞，书签小于点赞
+  function checkEngagement(n) {
+    return n.views >= n.likes &&
+           n.likes >= n.reposts &&
+           n.replies < n.likes &&
+           n.replies >= Math.floor(n.likes / 30) &&
+           n.replies <= Math.ceil(n.likes / 5) &&
+           n.bookmarks < n.likes &&
+           n.reposts >= Math.floor(n.likes / 8) &&
+           n.reposts <= Math.ceil(n.likes / 2);
+  }
+
+  // 不满足就整组重抽；最多重试 30 次，兜底返回一组（理论上到不了）
+  // prev 用来避免整组里某个数字和上一屏一模一样（看起来像没换）
+  function randomEngagement(prev) {
+    for (var i = 0; i < 30; i++) {
+      var n = makeEngagement();
+      var same = prev && (n.likes === prev.likes || n.reposts === prev.reposts ||
+                          n.replies === prev.replies || n.bookmarks === prev.bookmarks ||
+                          n.views === prev.views);
+      if (checkEngagement(n) && !same) return n;
+    }
+    return makeEngagement();
+  }
+
+  // handle：小写字母 + 可选下划线 + 2~4 位数字
+  function rollHandle(base) {
+    var clean = (base || 'someone').toLowerCase().replace(/[^a-z]/g, '') || 'someone';
+    var digits = String(rnd(10, 9999));
+    var under = Math.random() < 0.4 ? '_' : '';
+    return clean + under + digits;
+  }
+
+  function findPerson(name) {
+    for (var i = 0; i < PEOPLE.length; i++) {
+      if (PEOPLE[i].name === name) return PEOPLE[i];
+    }
+    return null;
+  }
+
+  /* ==========================================================
+     03. 数据 → 视图
+     ----------------------------------------------------------
+     所有文本都用 textContent 写入，不拼 innerHTML：
+     用户在编辑框里输入 <script> 也只会作为文字显示。
+     同一份昵称 / handle / 认证，同时写给主页头部和帖子卡。
+     ========================================================== */
+  function render() {
+    var name = nameInput.value.trim() || '未命名';
+    var handle = '@' + handleInput.value.trim().replace(/^@+/, '');
+    var showBadge = verifiedToggle.checked;
+
+    // 头像占位字母始终跟随昵称首字（图片存在时它只是被隐藏）
+    var letter = Array.from(name)[0] || '?';
+
+    // —— 主页头部 ——
+    profileTopName.textContent = name;
+    profileName.textContent = name;
+    profileHandle.textContent = handle;
+    profileBio.textContent = bioInput.value;
+    profileBadge.hidden = !showBadge;
+    $('countFollowing').textContent = formatCount(followingCount.value);
+    $('countFollowers').textContent = formatCount(followersCount.value);
+    profileAvatarLetter.textContent = letter;
+
+    // —— 帖子卡 ——
+    displayName.textContent = name;
+    handleText.textContent = handle;
+    // 时间：只存时间戳，显示时现算相对时间；输入框里同步显示同一个结果
+    var shownTime = formatTime(postTime);
+    timeText.textContent = shownTime;
+    timeInput.value = shownTime;
+    timeHint.textContent = absoluteTime(postTime) + ' · 卡片按相对时间显示';
+    postBody.textContent = bodyInput.value;
+    verifiedBadge.hidden = !showBadge;
+    avatarLetter.textContent = letter;
+
+    $('countReply').textContent = replyInput.value || '0';
+    $('countRepost').textContent = repostInput.value || '0';
+    $('countLike').textContent = likeInput.value || '0';
+    $('countView').textContent = viewInput.value || '0';
+    $('countBookmark').textContent = bookmarkInput.value || '0';
+  }
+
+  // 输入即渲染：不刷新页面
+  // 中文输入法拼音阶段的 input 事件也会触发，如果每次都 render，
+  // 卡片上的正文会被半截拼音反复替换，看起来像在抽搐。
+  // 用 compositionstart / compositionend 标记合成期，合成中跳过渲染。
+  var composing = false;
+
+  [nameInput, handleInput, bodyInput, bioInput,
+   followingCount, followersCount,
+   replyInput, repostInput, likeInput, viewInput, bookmarkInput].forEach(function (el) {
+    el.addEventListener('compositionstart', function () {
+      composing = true;
+    });
+    el.addEventListener('compositionend', function () {
+      composing = false;
+      render();
+    });
+    el.addEventListener('input', function () {
+      if (composing) return;
+      render();
+    });
+  });
+  verifiedToggle.addEventListener('change', render);
+
+  /* ==========================================================
+     04. 本地图片：FileReader → data URL
+     ----------------------------------------------------------
+     图片不经过任何服务器，读成 base64 直接塞给 <img>。
+     一张头像同时喂给主页的大头像和帖子卡的小头像。
+     ========================================================== */
+  function loadImage(file, onReady) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      onReady(reader.result);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  /* ==========================================================
+     04b. 头像来源：字母占位 / 本地上传 / 在线生成
+     ----------------------------------------------------------
+     在线生成用 DiceBear（bottts 机器人 / personas 插画人像 / identicon 像素块），
+     只用生成式头像，不接任何真人照片服务（如 pravatar）。
+
+     为什么取到图要立刻转成 base64 data URL？
+       导出图片走的是 SVG foreignObject + canvas。
+       foreignObject 里不能加载远程资源，而且画到 canvas 时远程图会污染
+       画布（tainted canvas），toBlob / toDataURL 直接抛安全错误，
+       导出的 PNG 要么空白要么失败。data URL 没有这两个问题。
+
+     两条转换路线（都实现了，实测走的是路线 1）：
+       1) fetch → blob → FileReader.readAsDataURL
+          DiceBear 响应带 Access-Control-Allow-Origin: *，不会触发 CORS 拦截。
+       2) 兜底：Image + crossOrigin="anonymous" 画到 canvas 再 toDataURL
+          用于 fetch 不可用 / 被拦 / blob 读失败的情况。
+
+     超时 3 秒；失败自动退回字母占位，只在按钮旁给一行小字，不弹窗。
+     初次打开页面不发任何请求 —— 只有点「换一个」才 fetch。
+     ========================================================== */
+  var avatarMode = 'letter';   // letter | upload | online
+  var avatarDataUrl = '';      // 当前头像（data URL）；空 = 字母占位
+  var avatarRoute = '';        // 记录这次用的是哪条转换路线（便于课上讲解 / 排查）
+  var avatarReqId = 0;         // 连点时只认最后一次请求的结果
+
+  var AVATAR_API = 'https://api.dicebear.com/9.x/';
+  var AVATAR_STYLES = ['bottts', 'personas', 'identicon'];
+
+  function nextAvatarUrl() {
+    var style = pick(AVATAR_STYLES);
+    var seed = String(rnd(100000, 999999));
+    return AVATAR_API + style + '/svg?seed=' + seed + '&size=256';
+  }
+
+  // 统一改头像：有图就显示图，没图就回到字母占位
+  function setAvatarImage(src) {
+    avatarDataUrl = src || '';
+    var has = !!avatarDataUrl;
+    if (has) {
+      avatarImg.src = avatarDataUrl;
+      profileAvatarImg.src = avatarDataUrl;
+    } else {
+      avatarImg.removeAttribute('src');
+      profileAvatarImg.removeAttribute('src');
+    }
+    avatarImg.hidden = !has;
+    profileAvatarImg.hidden = !has;
+    avatarLetter.hidden = has;
+    profileAvatarLetter.hidden = has;
+  }
+
+  function setAvatarMode(mode) {
+    avatarMode = mode;
+    Array.prototype.forEach.call(avatarModeGroup.querySelectorAll('button'), function (b) {
+      b.classList.toggle('on', b.dataset.avatarMode === mode);
+    });
+    avatarUploadRow.hidden = mode !== 'upload';
+    avatarOnlineRow.hidden = mode !== 'online';
+
+    // 换来源就把上一张清掉：三种来源各管一张，避免「明明是字母模式却还挂着一张图」
+    setAvatarImage('');
+    avatarFile.value = '';
+    avatarHint.textContent = '';
+
+    if (mode === 'letter') {
+      avatarDesc.textContent = '未上传时用昵称首字占位；一张图同时用于主页和帖子卡。';
+    } else if (mode === 'upload') {
+      avatarDesc.textContent = '图片只在本机读取（FileReader），不会上传到任何服务器。';
+    } else {
+      avatarDesc.textContent = '生成式头像（机器人 / 插画 / 像素），随机取一张，不联网保存。';
+      avatarHint.textContent = '点「换一个」取一张';
+    }
+  }
+
+  /* 取图并转 data URL；成功回调拿到 base64，失败回调拿到失败原因 */
+  function fetchAvatarDataUrl(url, onOk, onFail) {
+    var done = false;
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = setTimeout(function () {
+      if (done) return;
+      done = true;
+      if (ctrl) ctrl.abort();
+      onFail('超时');
+    }, 3000);
+
+    // 路线 2：<img crossOrigin> → canvas.toDataURL
+    function viaCanvas() {
+      var im = new Image();
+      im.crossOrigin = 'anonymous';
+      var t2 = setTimeout(function () {
+        if (done) return;
+        done = true;
+        im.src = '';
+        onFail('超时');
+      }, 3000);
+      im.onload = function () {
+        if (done) return;
+        done = true;
+        clearTimeout(t2);
+        try {
+          var c = document.createElement('canvas');
+          c.width = im.naturalWidth || 256;
+          c.height = im.naturalHeight || 256;
+          c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+          avatarRoute = 'canvas';
+          onOk(c.toDataURL('image/png'));
+        } catch (e) {
+          onFail('跨域受限');
+        }
+      };
+      im.onerror = function () {
+        if (done) return;
+        done = true;
+        clearTimeout(t2);
+        onFail('图片加载失败');
+      };
+      im.src = url;
+    }
+
+    if (typeof fetch !== 'function' || !ctrl) { done = true; clearTimeout(timer); viaCanvas(); return; }
+
+    fetch(url, { mode: 'cors', signal: ctrl.signal })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.blob();
+      })
+      .then(function (blob) {
+        var reader = new FileReader();
+        reader.onload = function () {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          avatarRoute = 'fetch';
+          onOk(reader.result);
+        };
+        reader.onerror = function () { viaCanvas(); };
+        reader.readAsDataURL(blob);
+      })
+      .catch(function () {
+        if (done) return;       // 已经超时失败了，别再补一次请求
+        clearTimeout(timer);
+        done = false;           // 交给 viaCanvas 重新计时
+        viaCanvas();
+      });
+  }
+
+  Array.prototype.forEach.call(avatarModeGroup.querySelectorAll('button'), function (btn) {
+    btn.addEventListener('click', function () {
+      setAvatarMode(btn.dataset.avatarMode);
+      flash(btn);
+    });
+  });
+
+  avatarFile.addEventListener('change', function () {
+    loadImage(this.files && this.files[0], function (src) {
+      setAvatarImage(src);
+    });
+  });
+
+  avatarClear.addEventListener('click', function () {
+    setAvatarImage('');
+    avatarFile.value = '';
+  });
+
+  avatarRoll.addEventListener('click', function () {
+    var btn = this;
+    var myId = ++avatarReqId;
+    avatarRoll.disabled = true;
+    avatarHint.textContent = '取图中…';
+
+    fetchAvatarDataUrl(nextAvatarUrl(), function (src) {
+      avatarRoll.disabled = false;
+      // 请求回来时用户可能已经切到别的来源，那就丢弃结果
+      if (myId !== avatarReqId || avatarMode !== 'online') return;
+      setAvatarImage(src);
+      avatarHint.textContent = '已生成 · ' + avatarRoute;
+      flash(btn);
+    }, function (reason) {
+      avatarRoll.disabled = false;
+      if (myId !== avatarReqId || avatarMode !== 'online') return;
+      // 失败：退回字母占位 + 一行提示，不白屏不弹窗
+      setAvatarImage('');
+      avatarHint.textContent = '取图失败（' + reason + '），已用字母占位';
+      flash(btn);
+    });
+  });
+
+  mediaFile.addEventListener('change', function () {
+    loadImage(this.files && this.files[0], function (src) {
+      mediaImg.src = src;
+      mediaWrap.hidden = false;
+    });
+  });
+
+  mediaClear.addEventListener('click', function () {
+    mediaImg.removeAttribute('src');
+    mediaWrap.hidden = true;
+    mediaFile.value = '';
+  });
+
+  /* ==========================================================
+     Handle 打码开关（预览与导出同步，默认关闭）
+     ----------------------------------------------------------
+     页面里 Handle 出现两次：
+       #profileHandle —— 个人主页头部
+       #handleText    —— 帖子卡头部
+     导出范围选「主页+帖子」时两张卡都会进 PNG，所以必须一起处理，
+     只打一个会在另一种范围下漏出来。
+
+     这里只切 class，不动 textContent，也不重建节点：
+       - renderAll() / 全部随机 / 恢复示例 都是改 input 后重写文本，
+         节点还在，class 不会丢；
+       - 导出走 cloneNode(true)，class 跟着进 SVG，
+         因此「预览看到的 == 导出的」，导出代码里不用再写一遍。
+     ========================================================== */
+  var maskHandleToggle = $('maskHandleToggle');
+  var handleEls = [document.getElementById('profileHandle'),
+                   document.getElementById('handleText')];
+
+  function applyHandleMask() {
+    var on = maskHandleToggle.checked;
+    handleEls.forEach(function (el) {
+      if (el) el.classList.toggle('is-masked', on);
+    });
+  }
+
+  maskHandleToggle.addEventListener('change', applyHandleMask);
+
+  // 初始化：复选框默认未勾选 → 不打码（刷新后同样保持关闭）
+  applyHandleMask();
+
+  /* ==========================================================
+     05. 主题切换
+     ----------------------------------------------------------
+     只改 body 的 data-theme，CSS 变量随之生效。
+     ========================================================== */
+  var themeButtons = document.querySelectorAll('[data-theme-btn]');
+
+  themeButtons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      body.dataset.theme = btn.dataset.themeBtn;
+      themeButtons.forEach(function (b) {
+        b.classList.toggle('on', b === btn);
+      });
+    });
+  });
+
+  /* ==========================================================
+     06. 预览内容切换：全部 / 主页头部 / 帖子卡
+     ----------------------------------------------------------
+     只切 hidden，不动 DOM 结构；两个区块的数据始终是同步的。
+     ========================================================== */
+  var viewButtons = document.querySelectorAll('[data-view-btn]');
+
+  viewButtons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var view = btn.dataset.viewBtn;
+      profileCard.hidden = (view === 'post');
+      postCard.hidden = (view === 'profile');
+      viewButtons.forEach(function (b) {
+        b.classList.toggle('on', b === btn);
+      });
+    });
+  });
+
+  /* ==========================================================
+     07. 结构标注开关
+     ----------------------------------------------------------
+     一个 body 类名控制全部描边与标签。
+     ========================================================== */
+  $('annotateToggle').addEventListener('change', function () {
+    body.classList.toggle('annotate', this.checked);
+  });
+
+  /* ==========================================================
+     08. 演示用的两套数据：随机 / 恢复示例
+     ----------------------------------------------------------
+     「随机」是整页唯一的随机入口：点一次，昵称、handle、简介、时间、
+     粉丝、关注、回复/转推/点赞/查看/书签——全部换掉，
+     等于换成"另一个人发的另一条帖子"。
+     所有随机都在本地算，不发任何请求。
+     ========================================================== */
+  var SAMPLE = {
+    name: '林知远',
+    handle: 'lin_zhiyuan',
+    bio: '前端老师。拆页面，也拆问题。\n平时写教学用的 HTML/CSS 小例子。',
+    following: 128,
+    followers: 12000,
+    reply: 12,
+    repost: 86,
+    like: 1204,
+    view: 8650,
+    bookmark: 34,
+    ageMinutes: 47      // 示例帖固定显示「47分钟前」，讲课时参照稳定
+  };
+
+  function applyRandom() {
+    // 昵称 + handle 一起换：handle 由名字的 slug 生成
+    // 连点时避免抽到当前这个人（最多重抽 5 次），不然看起来像没反应
+    var person = pick(PEOPLE);
+    for (var i = 0; i < 5 && person.name === nameInput.value; i++) person = pick(PEOPLE);
+    nameInput.value = person.name;
+    handleInput.value = rollHandle(person.slug);
+
+    // 简介同理：池子只有 6 条，连点很容易抽回上一条，看起来像没换
+    var bio = pick(BIOS);
+    for (var j = 0; j < 5 && bio === bioInput.value; j++) bio = pick(BIOS);
+    bioInput.value = bio;
+
+    // 粉丝 / 关注：关注数不超过粉丝数的 70%，避免一眼假
+    var followers = randomFollowers();
+    followersCount.value = followers;
+    followingCount.value = clamp(rnd(60, 4200), 1, Math.max(1, Math.round(followers * 0.7)));
+
+    // 互动数字：成组生成，保持偏序关系；传入上一组，避免某个数字原地不动
+    var e = randomEngagement({
+      likes: +likeInput.value, reposts: +repostInput.value, replies: +replyInput.value,
+      bookmarks: +bookmarkInput.value, views: +viewInput.value
+    });
+    likeInput.value = e.likes;
+    repostInput.value = e.reposts;
+    replyInput.value = e.replies;
+    bookmarkInput.value = e.bookmarks;
+    viewInput.value = e.views;
+
+    // 过去 72 小时内随机：昨天、前天都能落到
+    postTime = Date.now() - rnd(1, 72 * 60) * 60000;
+
+    render();
+  }
+
+  function applySample() {
+    nameInput.value = SAMPLE.name;
+    handleInput.value = SAMPLE.handle;
+    bioInput.value = SAMPLE.bio;
+    followingCount.value = SAMPLE.following;
+    followersCount.value = SAMPLE.followers;
+    replyInput.value = SAMPLE.reply;
+    repostInput.value = SAMPLE.repost;
+    likeInput.value = SAMPLE.like;
+    viewInput.value = SAMPLE.view;
+    bookmarkInput.value = SAMPLE.bookmark;
+    postTime = Date.now() - SAMPLE.ageMinutes * 60000;
+    render();
+  }
+
+  // 点击反馈：闪一下。先把类去掉并强制重排，动画才能重复播放
+  function flash(btn) {
+    btn.classList.remove('flash');
+    void btn.offsetWidth;
+    btn.classList.add('flash');
+  }
+
+  $('rollBtn').addEventListener('click', function () {
+    applyRandom();
+    flash(this);
+  });
+
+  $('resetBtn').addEventListener('click', function () {
+    applySample();
+    flash(this);
+  });
+
+  /* ==========================================================
+     09. 导出图片：DOM → SVG(foreignObject) → canvas → PNG
+     ----------------------------------------------------------
+     为什么不能直接把 DOM 存成图片？
+     因为浏览器没有这个 API。DOM 只是"排版指令"，屏幕上的像素是渲染
+     引擎临时算出来的，没有句柄能直接取。能取到的只有 canvas 和 SVG 这类
+     "可绘制对象"，所以必须先把 DOM 翻译成它。
+
+     方案 A：SVG + foreignObject（本页采用这条）
+       把卡片 DOM 克隆一份，连同样式规则一起塞进 <svg><foreignObject>，
+       让浏览器照常排版，再把整张 SVG 当图片画进 canvas。
+       优点：排版、圆角、字体、换行全部由浏览器完成，和屏幕上几乎一致，
+             代码量小，改样式不用同步改两套。
+       限制：foreignObject 里的内容不能引用外部资源——外链图片、外链
+             样式表一律不加载（本页头像/配图本来就是 data URL，正好；
+             CSS 也在这里被抽成全量内联 <style>）；
+             部分 CSS 在 SVG 环境里不完全生效，@media 直接跳过；
+             Safari 历史上对 foreignObject 支持不稳，容易整块空白。
+
+     方案 B：手写 canvas 逐块绘制
+       用 ctx.arc 裁圆头像、ctx.fillText 逐行排版、按行高计算换行，
+       图标用路径或 SVG 转 image 再画。
+       优点：任何浏览器表现一致、像素级可控。
+       代价：CSS 里的排版规则要在 JS 里重写一遍（行高、省略号、圆角），
+             以后页面改样式还得改导出代码，两套容易走偏。
+
+     为什么要 ×2（2 倍分辨率）？
+       屏幕上 1 个 CSS 像素往往对应 2～3 个物理像素（devicePixelRatio）。
+       按 1 倍导出，手机上看就会被拉伸变虚。所以画布宽高乘 2，
+       SVG 也以 2 倍尺寸栅格化，导出的 PNG 在任何屏幕上都是清晰的。
+     ========================================================== */
+  var FONT_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', " +
+                   "'PingFang SC', 'Microsoft YaHei', sans-serif";
+  var exportRange = 'post';   // post | both
+  var exportPad = 48;         // 32 | 48 | 64
+
+  // 收集页面里所有 CSS 规则，内联进导出文档；@media 跳过
+  function collectCss() {
+    var out = [];
+    for (var i = 0; i < document.styleSheets.length; i++) {
+      var rules;
+      try {
+        rules = document.styleSheets[i].cssRules;
+      } catch (e) {
+        continue;             // 跨域样式表读不到规则，跳过
+      }
+      for (var j = 0; j < rules.length; j++) {
+        if (rules[j].type === CSSRule.MEDIA_RULE) continue;
+        out.push(rules[j].cssText);
+      }
+    }
+    return out.join('\n');
+  }
+
+  // 生成导出用的 SVG 字符串（1 倍坐标 + 2 倍尺寸，交给 SVG 自己缩放）
+  function buildExportSvg(range, pad, scale) {
+    var cardW = Math.round(postCard.getBoundingClientRect().width) || 600;
+
+    // 1) 临时容器：克隆要导出的卡片，插进文档才能量出真实高度
+    var temp = document.createElement('div');
+    temp.style.cssText = 'position:fixed;left:-9999px;top:0;width:' + cardW + 'px;' +
+                         'display:flex;flex-direction:column;gap:16px;';
+    var clones = [];
+    if (range === 'both') clones = [profileCard, postCard];
+    else clones = [postCard];
+
+    clones.forEach(function (card) {
+      var copy = card.cloneNode(true);
+      copy.removeAttribute('hidden');       // 「仅主页」视图下帖子是 hidden 的，导出要强制显示
+      temp.appendChild(copy);
+    });
+
+    document.body.appendChild(temp);
+    var height = Math.max(1, Math.ceil(temp.getBoundingClientRect().height));
+    var markup = temp.innerHTML;
+    document.body.removeChild(temp);
+
+    // 2) 组装导出 DOM：data-theme 挂在这一层，CSS 变量照样继承
+    var holder = document.createElement('div');
+    holder.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+    holder.setAttribute('data-theme', body.dataset.theme);
+    holder.setAttribute('style',
+      'display:flex;flex-direction:column;gap:16px;width:' + cardW + 'px;' +
+      'font-family:' + FONT_STACK + ';color:var(--text);');
+
+    var styleEl = document.createElement('style');
+    styleEl.textContent = collectCss();    // 所有样式内联，不依赖外部 CSS
+    holder.appendChild(styleEl);
+    holder.insertAdjacentHTML('beforeend', markup);
+
+    var outW = cardW + pad * 2;
+    var outH = height + pad * 2;
+    var bg = getComputedStyle(body).getPropertyValue('--page-bg').trim() || '#000';
+
+    var xml = new XMLSerializer().serializeToString(holder);
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="' + outW * scale + '" height="' + outH * scale + '" ' +
+        'viewBox="0 0 ' + outW + ' ' + outH + '">' +
+        '<rect width="' + outW + '" height="' + outH + '" fill="' + bg + '"/>' +
+        '<foreignObject x="' + pad + '" y="' + pad + '" width="' + cardW + '" height="' + height + '">' +
+          xml +
+        '</foreignObject>' +
+      '</svg>';
+
+    return { svg: svg, w: outW, h: outH, bg: bg };
+  }
+
+  function stamp() {
+    var d = new Date();
+    return '' + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) +
+           '-' + pad2(d.getHours()) + pad2(d.getMinutes());
+  }
+
+  function exportCard() {
+    var SCALE = 2;
+    var spec = buildExportSvg(exportRange, exportPad, SCALE);
+    var img = new Image();
+    var note = $('exportNote');
+    note.textContent = '正在生成…';
+
+    img.onload = function () {
+      var canvas = document.createElement('canvas');
+      canvas.width = spec.w * SCALE;
+      canvas.height = spec.h * SCALE;
+      var ctx = canvas.getContext('2d');
+
+      // 先铺主题底色：SVG 里也有 rect，这里是双保险，
+      // 保证导出的 PNG 不会有透明底、也不会出现白边
+      ctx.fillStyle = spec.bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob(function (blob) {
+        if (!blob) { note.textContent = '生成失败'; return; }
+        var a = document.createElement('a');
+        var url = URL.createObjectURL(blob);
+        a.href = url;
+        a.download = 'x-post-' + stamp() + '.png';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        note.textContent = '已导出 ' + canvas.width + '×' + canvas.height;
+      }, 'image/png');
+    };
+
+    img.onerror = function () {
+      note.textContent = 'SVG 渲染失败';
+      console.error('导出失败：foreignObject 转图片时出错');
+    };
+
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(spec.svg);
+  }
+
+  $('exportBtn').addEventListener('click', function () {
+    flash(this);
+    exportCard();
+  });
+
+  document.querySelectorAll('[data-export-range]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      exportRange = btn.dataset.exportRange;
+      document.querySelectorAll('[data-export-range]').forEach(function (b) {
+        b.classList.toggle('on', b === btn);
+      });
+    });
+  });
+
+  document.querySelectorAll('[data-pad]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      exportPad = Number(btn.dataset.pad);
+      document.querySelectorAll('[data-pad]').forEach(function (b) {
+        b.classList.toggle('on', b === btn);
+      });
+      $('exportNote').textContent = 'PNG · 2 倍 · 边距 ' + exportPad;
+    });
+  });
+
+  /* 首次渲染：时间就是打开页面这一刻 */
+  postTime = Date.now();
+  render();
+
+  // 每 30 秒重算一次相对时间：停在页面上也能看到「刚刚 → 1分钟前」
+  setInterval(function () {
+    if (composing) return;
+    render();
+  }, 30000);
+})();
+</script>
+</body>
+</html>
