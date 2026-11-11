@@ -1,5 +1,14 @@
 # 发布记录
 
+## v1.0.1 — 2026-11-11
+
+补丁版本：消除静态部署下的控制台 404。
+
+- 现象：GitHub Pages 部署后浏览器自动请求 `https://openclawzhangchong.github.io/favicon.ico`，返回 404，控制台出现一条资源错误（与页面逻辑无关，功能全部正常）。
+- 修法：`index.html` 的 `<head>` 增加一行内联 base64 SVG favicon，浏览器不再发起默认 favicon 请求；仍是单文件、无外链。
+- 改动位置：`index.html` head 区 1 行；`README.md` 版本行；`RELEASE_NOTES.md` 本节。
+- 复验：本地 / GitHub Pages 自测恢复 9/9 PASS，控制台无报错。
+
 ## v1.0.0 — 2026-11-11
 
 首个**公开版本**。此前均为本地迭代，本次归档开源并同时部署 GitHub Pages 与 here.now。
